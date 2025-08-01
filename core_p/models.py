@@ -10,10 +10,18 @@ class PCTags(models.Model):
     def __str__(self):
         return self.name
 
-class ProductMeta:
-    productMetaTitle = models.CharField(max_length=255, blank=True, null=True)
-    productMetaDescription = models.TextField(blank=True, null=True)
-    productMetaKeywords = models.CharField(max_length=255, blank=True, null=True)
+class ProductMeta(models.Model):
+    metaTitle = models.CharField(max_length=255)
+    metaDescription = models.TextField()
+    metaKeywords = models.TextField()
+
+    def __str__(self):
+        return self.metaTitle
+
+    class Meta:
+        verbose_name = 'Product Meta'
+        verbose_name_plural = 'Product Metas'
+
 
 
 class ProductVariant(models.Model):
@@ -70,12 +78,17 @@ class ProductCollection(models.Model):
     
 class ProductShipping(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    shippingMethod = models.CharField(max_length=100)
-    shippingCost = models.DecimalField(max_digits=10, decimal_places=2)
+    shippingUnit = models.CharField(max_length=100, choices=[
+        ('kg', 'Kilogram'),
+        ('lb', 'Pound'),
+        ('oz', 'Ounce'),
+        ('g', 'Gram'),
+    ], default='kg')
+    shippingWeight = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.shippingMethod} - {self.shippingCost}"
+        return f"{self.shippingUnit} - {self.shippingUnit}"
     
 
 class Product(models.Model):
@@ -108,14 +121,18 @@ class Product(models.Model):
         ('published', 'Published'),
         ('archived', 'Archived'),
         ])
-    productRating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
-    productReviewsCount = models.PositiveIntegerField(default=0)
+    productRating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, blank=True, null=True)
+    productReviewsCount = models.PositiveIntegerField(default=0, blank=True, null=True)
     productIsFeatured = models.BooleanField(default=False)
     productIsOnSale = models.BooleanField(default=False)
     productSaleCountinue = models.BooleanField(default=False)
     productIsTrackQuantity =  models.BooleanField(default=False)
     productCreatedAt = models.DateTimeField(auto_now_add=True)
     productUpdatedAt = models.DateTimeField(auto_now=True)
+    productSeo = models.OneToOneField('ProductMeta', on_delete=models.CASCADE, related_name='products', null=True, blank=True)
+
+    def __str__(self):
+        return self.productName
 
 
 
