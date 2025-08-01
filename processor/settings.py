@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import os
 
+LOCAL_ENV = os.getenv("LOCAL_ENV", False)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,7 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-upkrivw6ipv1q)63-i)f!m3g7(+wnv7ciq7y67l!$ij677&=mj'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+HOST = 'localhost' if LOCAL_ENV else '68.183.111.2'
+
+if LOCAL_ENV:
+    DEBUG = True
+else:
+    DEBUG = False
 
 ALLOWED_HOSTS = ['*']
 
@@ -55,11 +61,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'processor.urls'
-AUTH_USER_MODEL = 'core_a.CustomUser'
-STATIC_URL = 'static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-MEDIA_URL = 'media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -81,10 +83,21 @@ WSGI_APPLICATION = 'processor.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'doorbixv0',
+        'USER': 'tahir',
+        'PASSWORD': 'Zaman7860@Tahir123',
+        'HOST': HOST,
+        'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET NAMES 'utf8mb4'",
+            
+        },
     }
 }
 
@@ -129,3 +142,14 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+
+# CUS Settings
+AUTH_USER_MODEL = 'core_a.CustomUser'
+STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+MEDIA_URL = 'media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
