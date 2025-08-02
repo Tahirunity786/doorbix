@@ -1,6 +1,9 @@
 import uuid
 from django.db import models
 from django.utils import timezone
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 # Create your models here.
@@ -47,6 +50,17 @@ class ProductVariant(models.Model):
 
     def __str__(self):
         return self.variantName
+    
+class ProductReview(models.Model):
+    reviewd_by = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True)
+    review_to = models.ForeignKey('Product', on_delete=models.CASCADE, db_index=True)
+    rating_image = models.ImageField(upload_to='rating_product', blank=True, null=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, db_index=True, blank=True, null=True)
+    rating_comment = models.TextField(db_index=True)
+
+    def __str__(self):
+        return f'Review by {self.reviewd_by.get_full_name()} for {self.review_to.productName}'
+
     
 
 class ProductImageSchema(models.Model):
@@ -121,8 +135,6 @@ class Product(models.Model):
         ('published', 'Published'),
         ('archived', 'Archived'),
         ])
-    productRating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, blank=True, null=True)
-    productReviewsCount = models.PositiveIntegerField(default=0, blank=True, null=True)
     productIsFeatured = models.BooleanField(default=False)
     productIsOnSale = models.BooleanField(default=False)
     productSaleCountinue = models.BooleanField(default=False)
