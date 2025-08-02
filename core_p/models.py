@@ -55,7 +55,7 @@ class ProductImageSchema(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Image for {self.product.productName}"
+        return f"Image for {self.id}"
 
 class ProductCategory(models.Model):
     categoryName = models.CharField(max_length=255, unique=True)
