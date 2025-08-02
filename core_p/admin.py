@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product,Inventory,ProductMeta, InventoryHistory, ProductCategory, ProductCollection, ProductImageSchema, ProductShipping, ProductVariant, PCTags
+from .models import Product,Inventory,ProductMeta,ProductReview, InventoryHistory, ProductCategory, ProductCollection, ProductImageSchema, ProductShipping, ProductVariant, PCTags
 # Register your models here.
 
 
@@ -10,6 +10,7 @@ admin.site.register(ProductShipping)
 admin.site.register(ProductVariant)
 admin.site.register(PCTags)
 admin.site.register(ProductMeta)
+admin.site.register(ProductReview)
 
 
 @admin.register(Product)
