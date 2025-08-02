@@ -9,11 +9,13 @@ User = get_user_model()
 # Create your models here.
 
 class PCTags(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True)
     def __str__(self):
         return self.name
 
 class ProductMeta(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     metaTitle = models.CharField(max_length=255)
     metaDescription = models.TextField()
     metaKeywords = models.TextField()
@@ -52,6 +54,7 @@ class ProductVariant(models.Model):
         return self.variantName
     
 class ProductReview(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reviewd_by = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True)
     review_to = models.ForeignKey('Product', on_delete=models.CASCADE, db_index=True)
     rating_image = models.ImageField(upload_to='rating_product', blank=True, null=True)
@@ -72,6 +75,7 @@ class ProductImageSchema(models.Model):
         return f"Image for {self.id}"
 
 class ProductCategory(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     categoryName = models.CharField(max_length=255, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     

@@ -83,7 +83,7 @@ class ProductShippingSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     # Related field serializers
     id = serializers.UUIDField(format='hex', read_only=True)
-    productCategory = ProductCategorySerializer()
+    productCategory = ProductCategorySerializer(many=True)
     productImages = ProductImageSerializer(many=True, required=False)
     productTags = PCTagSerializer(many=True, required=False)
     productCollection = ProductCollectionSerializer(many=True, required=False)
@@ -92,6 +92,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
+        depth = 1
         fields = [
             'id',
             'productName',
@@ -107,12 +108,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'productCreatedAt',
             'productUpdatedAt',
             'productImages',
-            'productMetaTitle',
-            'productMetaDescription',
-            'productMetaKeywords',
             'productSlug',
-            'productRating',
-            'productReviewsCount',
             'productIsFeatured',
             'productIsOnSale',
             'productShipping',
