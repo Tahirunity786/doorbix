@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from django.utils.text import slugify
 
 User = get_user_model()
 
@@ -34,9 +35,9 @@ class ProductVariant(models.Model):
     variantImage = models.ImageField(upload_to='variant_images/')
     variantName = models.CharField(max_length=255)
     variantPrice = models.DecimalField(max_digits=10, decimal_places=2)
-    variantSKU = models.CharField(max_length=100, unique=True)
+    variantSKU = models.CharField(max_length=100, unique=True, editable=False)
     variantStock = models.PositiveIntegerField(default=0)
-    variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True, editable=False)
     variantIsActive = models.BooleanField(default=True)
     variantCreatedAt = models.DateTimeField(auto_now_add=True)
     variantUpdatedAt = models.DateTimeField(auto_now=True)
@@ -86,9 +87,9 @@ class ProductCategory(models.Model):
 class ProductCollection(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     collectionName = models.CharField(max_length=255, unique=True)
-    collectionImage = models.ImageField(upload_to='collection_images/', blank=True, null=True)
+    collectionImage = models.ImageField(upload_to='collection_images/')
     collectionTags = models.ManyToManyField(PCTags, related_name='collections', blank=True)
-    collectionDescription = models.TextField(blank=True, null=True)
+    collectionDescription = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +142,7 @@ class Product(models.Model):
         ])
     productIsFeatured = models.BooleanField(default=False)
     productIsOnSale = models.BooleanField(default=False)
+    productIsBestSelling = models.BooleanField(default=False)
     productSaleCountinue = models.BooleanField(default=False)
     productIsTrackQuantity =  models.BooleanField(default=False)
     productCreatedAt = models.DateTimeField(auto_now_add=True)
@@ -149,6 +151,18 @@ class Product(models.Model):
 
     def __str__(self):
         return self.productName
+    
+    def save(self, *args, **kwargs):
+        if not self.productSlug:
+            base_slug = slugify(self.productName)
+            unique_slug = base_slug
+            num = 1
+            while Product.objects.filter(productSlug=unique_slug).exists():
+                unique_slug = f"{base_slug}-{num}"
+                num += 1
+            self.productSlug = unique_slug
+
+        return super().save(*args, **kwargs)
 
 
 
