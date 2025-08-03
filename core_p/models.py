@@ -143,6 +143,7 @@ class Product(models.Model):
     productIsFeatured = models.BooleanField(default=False)
     productIsOnSale = models.BooleanField(default=False)
     productIsBestSelling = models.BooleanField(default=False)
+    productIsForSubscription = models.BooleanField(default=False)
     productSaleCountinue = models.BooleanField(default=False)
     productIsTrackQuantity =  models.BooleanField(default=False)
     productCreatedAt = models.DateTimeField(auto_now_add=True)
