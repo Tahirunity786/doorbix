@@ -80,6 +80,25 @@ class ProductShippingSerializer(serializers.ModelSerializer):
 
 
 # ----------- Main Product Serializer -----------
+
+class MiniProductSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(format='hex', read_only=True)
+    productImages = ProductImageSerializer(many=True, required=False)
+    productVariant = ProductVariantSerializer(required=False)
+
+    class Meta:
+        model = Product  # Make sure to replace with your actual Product model
+        fields = [
+            'id',
+            'productSlug',
+            'productName',
+            'productDescription',
+            'productPrice',
+            'productComparePrice',
+            'productImages',
+            'productVariant',
+        ]
+
 class ProductSerializer(serializers.ModelSerializer):
     # Related field serializers
     id = serializers.UUIDField(format='hex', read_only=True)
@@ -103,14 +122,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'productCategory',
             'productStock',
             'productSKU',
-            'productBarcode',
-            'productIsActive',
-            'productCreatedAt',
-            'productUpdatedAt',
             'productImages',
             'productSlug',
-            'productIsFeatured',
-            'productIsOnSale',
             'productShipping',
             'productTags',
             'productCollection',
@@ -118,5 +131,4 @@ class ProductSerializer(serializers.ModelSerializer):
             'productVendor',
             'productVariant',
             'productSaleCountinue',
-            'productIsTrackQuantity'
         ]
