@@ -22,7 +22,7 @@ class ProductViewSet(viewsets.ViewSet):
         queryset = Product.objects.all()
     
         if product_type in self.PRODUCT_TYPE_FILTERS:
-            queryset = queryset.filter(**self.PRODUCT_TYPE_FILTERS[product_type]).order_by('-productCreatedAt')
+            queryset = queryset.filter(**self.PRODUCT_TYPE_FILTERS[product_type], productIsActive="published").order_by('-productCreatedAt')
     
         # Limit the number of results if quantity is provided and valid
         if product_quantity:
