@@ -10,6 +10,9 @@ from .models import (
 )
 
 
+
+
+
 # ----------- Tag Serializer -----------
 class PCTagSerializer(serializers.ModelSerializer):
     class Meta:
@@ -57,30 +60,8 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         fields = ['id', 'categoryName']
 
 
-# ----------- Product Collection Serializer -----------
-class ProductCollectionSerializer(serializers.ModelSerializer):
-    collectionTags = PCTagSerializer(many=True)
 
-    class Meta:
-        model = ProductCollection
-        fields = [
-            'id',
-            'collectionName',
-            'collectionImage',
-            'collectionDescription',
-            'collectionTags'
-        ]
-
-
-# ----------- Product Shipping Serializer -----------
-class ProductShippingSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductShipping
-        fields = ['id', 'shippingMethod', 'shippingCost']
-
-
-# ----------- Main Product Serializer -----------
-
+# ----------- Mini Version Serializer -----------
 class MiniProductSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(format='hex', read_only=True)
     productImages = ProductImageSerializer(many=True, required=False)
@@ -98,6 +79,37 @@ class MiniProductSerializer(serializers.ModelSerializer):
             'productImages',
             'productVariant',
         ]
+
+        
+# ----------- Product Collection Serializer -----------
+class ProductCollectionSerializer(serializers.ModelSerializer):
+    collectionTags = PCTagSerializer(many=True)
+    products = MiniProductSerializer(many=True, read_only=True)  # Use Mini or Full Product Serializer
+
+    class Meta:
+        model = ProductCollection
+        fields = [
+            'id',
+            'collectionName',
+            'collectionSlug',
+            'collectionImage',
+            'collectionDescription',
+            'collectionTags',
+            'products'  # Include related products
+        ]
+
+
+
+# ----------- Product Shipping Serializer -----------
+class ProductShippingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductShipping
+        fields = ['id', 'shippingMethod', 'shippingCost']
+
+
+# ----------- Main Product Serializer -----------
+
+
 
 class ProductSerializer(serializers.ModelSerializer):
     # Related field serializers
@@ -132,3 +144,5 @@ class ProductSerializer(serializers.ModelSerializer):
             'productVariant',
             'productSaleCountinue',
         ]
+
+

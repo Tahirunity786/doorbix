@@ -87,6 +87,7 @@ class ProductCategory(models.Model):
 class ProductCollection(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     collectionName = models.CharField(max_length=255, unique=True)
+    collectionSlug = models.CharField(max_length=255, unique=True, blank=True, null=True,  default="")
     collectionImage = models.ImageField(upload_to='collection_images/')
     collectionTags = models.ManyToManyField(PCTags, related_name='collections', blank=True)
     collectionDescription = models.TextField()
@@ -94,6 +95,18 @@ class ProductCollection(models.Model):
 
     def __str__(self):
         return self.collectionName
+    
+    def save(self, *args, **kwargs):
+        if not self.collectionSlug:
+            base_slug = slugify(self.collectionName)
+            unique_slug = base_slug
+            num = 1
+            while ProductCollection.objects.filter(collectionSlug=unique_slug).exists():
+                unique_slug = f"{base_slug}-{num}"
+                num += 1
+            self.collectionSlug = unique_slug
+
+        return super().save(*args, **kwargs)
     
 class ProductShipping(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
