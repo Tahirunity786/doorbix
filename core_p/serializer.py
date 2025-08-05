@@ -104,7 +104,7 @@ class ProductCollectionSerializer(serializers.ModelSerializer):
 class ProductShippingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductShipping
-        fields = ['id', 'shippingMethod', 'shippingCost']
+        fields = ['id', 'shippingUnit', 'shippingWeight']
 
 
 # ----------- Main Product Serializer -----------

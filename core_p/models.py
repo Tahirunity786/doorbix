@@ -19,7 +19,7 @@ class ProductMeta(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     metaTitle = models.CharField(max_length=255)
     metaDescription = models.TextField()
-    metaKeywords = models.TextField()
+    metaKeywords = models.ManyToManyField(PCTags, related_name="metaTags", blank=True)
 
     def __str__(self):
         return self.metaTitle
