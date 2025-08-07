@@ -3,6 +3,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.utils.text import slugify
+from ckeditor.fields import RichTextField
 
 User = get_user_model()
 
@@ -139,7 +140,7 @@ class Product(models.Model):
         null=True,
         blank=True
     )
-    productDescription = models.TextField()
+    productDescription = RichTextField()
     productPrice = models.DecimalField(max_digits=10, decimal_places=2)
     productCostPrice = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     productComparePrice = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
