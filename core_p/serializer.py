@@ -62,6 +62,17 @@ class ProductCategorySerializer(serializers.ModelSerializer):
 
 
 # ----------- Mini Version Serializer -----------
+class MiniCollectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductCollection
+        fields = [
+            'id',
+            'collectionName',
+            'collectionSlug',
+            'collectionImage',
+            'collectionDescription',
+        ]
+
 class MiniProductSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(format='hex', read_only=True)
     productImages = ProductImageSerializer(many=True, required=False)

@@ -4,12 +4,11 @@ from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.encoding import iri_to_uri
 
-from .models import Product, ProductCollection
-from .serializer import ProductSerializer, MiniProductSerializer, ProductCollectionSerializer
 
+from .models import Product, ProductCollection
+from .serializer import ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
 
 class ProductViewSet(viewsets.ViewSet):
-
     PRODUCT_TYPE_FILTERS = {
         'bestSelling': {'productIsBestSelling': True},
         'featuredProducts': {'productIsFeatured': True},
@@ -21,11 +20,12 @@ class ProductViewSet(viewsets.ViewSet):
     def list(self, request):
         product_type = request.query_params.get('type')
         product_quantity = request.query_params.get('quantity')
+        allow_collection = request.query_params.get('collection')
 
-        # Create a unique cache key based on query parameters
-        cache_key = f"products:list:type={product_type}&quantity={product_quantity}"
+        print(allow_collection)
+
+        cache_key = f"products:list:type={product_type}&quantity={product_quantity}&collection={allow_collection}"
         cached_data = cache.get(cache_key)
-
         if cached_data:
             return Response(cached_data)
 
@@ -38,16 +38,23 @@ class ProductViewSet(viewsets.ViewSet):
             ).order_by('-productCreatedAt')
 
         if product_quantity:
-            try:
-                quantity = int(product_quantity)
-                queryset = queryset[:quantity]
-            except ValueError:
+            quantity = self._parse_int(product_quantity, "quantity")
+            if quantity is None:
                 return Response({'error': 'Invalid quantity. Must be an integer.'}, status=400)
+            queryset = queryset[:quantity]
 
-        serializer = MiniProductSerializer(queryset, many=True)
-        data = serializer.data
+        data = MiniProductSerializer(queryset, many=True).data
 
-        # Cache the data for 5 minutes (300 seconds)
+        if allow_collection:
+            collection_quantity = self._parse_int(allow_collection, "collection quantity")
+            if collection_quantity is None:
+                return Response({'error': 'Invalid collection quantity. Must be an integer.'}, status=400)
+            collections = ProductCollection.objects.all()[:collection_quantity]
+            data = {
+                "products": data,
+                "collections": MiniCollectionSerializer(collections, many=True).data
+            }
+
         cache.set(cache_key, data, timeout=300)
         return Response(data)
 
@@ -55,21 +62,20 @@ class ProductViewSet(viewsets.ViewSet):
         slug = iri_to_uri(pk)
         cache_key = f"products:detail:{slug}"
         cached_data = cache.get(cache_key)
-
         if cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
 
+        product = get_object_or_404(Product, productSlug=slug)
+        data = ProductSerializer(product).data
+        cache.set(cache_key, data, timeout=300)
+        return Response(data, status=status.HTTP_200_OK)
+
+    def _parse_int(self, value, field_name):
         try:
-            product = get_object_or_404(Product, productSlug=slug)
-            serializer = ProductSerializer(product)
-            data = serializer.data
-            cache.set(cache_key, data, timeout=300)
-            return Response(data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(
-                {"error": "Something went wrong", "details": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return int(value)
+        except ValueError:
+            return None
+
 
 
 class CollectionViewset(viewsets.ViewSet):
@@ -77,12 +83,20 @@ class CollectionViewset(viewsets.ViewSet):
     def list(self, request):
         cache_key = "collections:list"
         cached_data = cache.get(cache_key)
+        product_quantity = request.query_params.get('quantity')
 
         if cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         try:
             collections = ProductCollection.objects.all()
+            if product_quantity:
+                try:
+                    quantity = int(product_quantity)
+                    collections = collections[:quantity]
+                except ValueError:
+                    return Response({'error': 'Invalid quantity. Must be an integer.'}, status=400)
+
             serializer = ProductCollectionSerializer(collections, many=True)
             data = serializer.data
             cache.set(cache_key, data, timeout=300)
