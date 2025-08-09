@@ -62,14 +62,14 @@ class Comments(models.Model):
 
 class BlogPost(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    blogImage = models.ImageField(upload_to="blogs_upload/", null=True, blank=True)
+    blogImage = models.ImageField(upload_to="blogs_upload/")
     blogTitle = models.CharField(max_length=200, db_index=True)
-    slug = models.SlugField(max_length=220, unique=True, blank=True, db_index=True)
+    slug = models.SlugField(max_length=220, unique=True, blank=True, db_index=True, editable=False)
     blogDescription = RichTextField()
     blogExcerpt = models.TextField(max_length=500, blank=True, help_text="Short summary for previews & SEO.")
     blogTags = models.ManyToManyField(Tags, related_name="blog_posts", blank=True)
     blogCategory = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, related_name="posts")
-    
+
     metaTitle = models.CharField(max_length=255, blank=True, help_text="SEO meta title.")
     metaDescription = models.CharField(max_length=300, blank=True, help_text="SEO meta description.")
 
