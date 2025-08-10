@@ -5,8 +5,8 @@ from django.core.cache import cache
 from django.utils.encoding import iri_to_uri
 
 
-from .models import Product, ProductCollection
-from .serializer import ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
+from .models import Product, ProductCategory, ProductCollection
+from .serializer import ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
 
 class ProductViewSet(viewsets.ViewSet):
     PRODUCT_TYPE_FILTERS = {
@@ -21,8 +21,7 @@ class ProductViewSet(viewsets.ViewSet):
         product_type = request.query_params.get('type')
         product_quantity = request.query_params.get('quantity')
         allow_collection = request.query_params.get('collection')
-
-        print(allow_collection)
+        all_category = request.query_params.get('category')=="true"
 
         cache_key = f"products:list:type={product_type}&quantity={product_quantity}&collection={allow_collection}"
         cached_data = cache.get(cache_key)
@@ -50,10 +49,16 @@ class ProductViewSet(viewsets.ViewSet):
             if collection_quantity is None:
                 return Response({'error': 'Invalid collection quantity. Must be an integer.'}, status=400)
             collections = ProductCollection.objects.all()[:collection_quantity]
+
             data = {
                 "products": data,
                 "collections": MiniCollectionSerializer(collections, many=True).data
             }
+        
+        if all_category:
+            categories = ProductCategory.objects.all().order_by('-created_at')
+            data['categories'] = ProductCategorySerializer(categories, many=True).data
+            
 
         cache.set(cache_key, data, timeout=300)
         return Response(data)

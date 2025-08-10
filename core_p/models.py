@@ -1,9 +1,12 @@
+from decimal import Decimal
 import uuid
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.utils.text import slugify
 from ckeditor.fields import RichTextField
+from django.core.exceptions import ValidationError
+
 
 User = get_user_model()
 
@@ -278,3 +281,282 @@ class InventoryHistory(models.Model):
         return f"{self.get_change_type_display()} - {self.quantity} on {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
 
     
+class Discount(models.Model):
+    """
+    Flexible discount/coupon model.
+
+    Usage patterns supported:
+      - Link to specific Product(s) via `products` M2M.
+      - Link to specific ProductVariant(s) via `variants` M2M (optional).
+      - Link to specific ProductCategory(s) via `categories` M2M.
+      - Link to specific ProductCollection(s) via `collections` M2M.
+      - If none of the target M2Ms are populated, the discount is treated as GLOBAL
+        (applies to all products unless other constraints prevent it).
+    """
+
+    # --- Identity & basic metadata ---
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=180, help_text="Human readable name for admin")
+    code = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Optional coupon code. Leave blank for automatic discounts (no code required)."
+    )
+    description = models.TextField(blank=True, null=True)
+
+    # --- Discount amount specification ---
+    DISCOUNT_TYPE_PERCENT = "percent"
+    DISCOUNT_TYPE_FIXED = "fixed"
+    DISCOUNT_TYPE_CHOICES = [
+        (DISCOUNT_TYPE_PERCENT, "Percentage"),
+        (DISCOUNT_TYPE_FIXED, "Fixed amount"),
+    ]
+    discount_type = models.CharField(
+        max_length=10,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default=DISCOUNT_TYPE_PERCENT,
+        help_text="Percentage will be applied as price * (value / 100). Fixed amount subtracts value from price."
+    )
+    # value meaning:
+    # - if percent: value = 10.00 means 10% off
+    # - if fixed: value = 5.00 means 5 currency units off
+    value = models.DecimalField(max_digits=12, decimal_places=2)
+
+    # --- Scope / target relations ---
+    # Import your existing product-related models here. Adjust app names if different.
+    # These fields are optional and can be left empty to indicate a global discount.
+    products = models.ManyToManyField(
+        "Product", related_name="discounts", blank=True,
+        help_text="Products this discount explicitly applies to."
+    )
+    variants = models.ManyToManyField(
+        "ProductVariant", related_name="discounts", blank=True,
+        help_text="Optional: apply discount only to specific product variants."
+    )
+    categories = models.ManyToManyField(
+        "ProductCategory", related_name="discounts", blank=True,
+        help_text="Product categories this discount applies to."
+    )
+    collections = models.ManyToManyField(
+        "ProductCollection", related_name="discounts", blank=True,
+        help_text="Product collections this discount applies to."
+    )
+
+    # --- Conditions & rules ---
+    start_date = models.DateTimeField(
+        blank=True, null=True, help_text="If blank, discount is active immediately."
+    )
+    end_date = models.DateTimeField(
+        blank=True, null=True, help_text="If blank, discount does not expire."
+    )
+    active = models.BooleanField(default=True, help_text="Master toggle for the discount.")
+    combinable = models.BooleanField(
+        default=False,
+        help_text="If False, this discount cannot be stacked with other discounts in the same order."
+    )
+    minimum_order_value = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="Minimum cart / item value required to apply this discount (optional)."
+    )
+
+    # Usage limits
+    usage_limit = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Maximum number of times this discount may be used across all users. Null = unlimited."
+    )
+    usage_limit_per_user = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Maximum number of times a single user may use this discount. Null = unlimited."
+    )
+
+    # Priority - higher priority discounts are considered first when resolving conflicts
+    priority = models.IntegerField(default=0, help_text="Higher priority discounts are applied first.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-priority", "name")
+        indexes = [
+            models.Index(fields=["code"]),
+            models.Index(fields=["active", "start_date", "end_date"]),
+        ]
+
+    def __str__(self):
+        if self.code:
+            return f"{self.name} ({self.code})"
+        return self.name
+
+    # -----------------------
+    # Validation & utilities
+    # -----------------------
+    def clean(self):
+        """
+        Model-level validation:
+          - start_date cannot be after end_date
+          - If discount_type is percent, value must be between 0 and 100 (inclusive)
+          - If no targets and no code and value == 0, warn/error (business choice)
+        """
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValidationError({"end_date": "End date must be after start date."})
+
+        if self.discount_type == self.DISCOUNT_TYPE_PERCENT:
+            if self.value < Decimal("0.00") or self.value > Decimal("100.00"):
+                raise ValidationError({"value": "Percentage discounts must be between 0 and 100."})
+        else:
+            if self.value < Decimal("0.00"):
+                raise ValidationError({"value": "Fixed discount must be non-negative."})
+
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        # Normalize code to uppercase (if provided)
+        if self.code:
+            self.code = self.code.strip().upper()
+        return super().save(*args, **kwargs)
+
+    def is_active(self, at_time=None):
+        """
+        Check whether the discount is currently active (time window + active flag).
+        """
+        now = at_time or timezone.now()
+        if not self.active:
+            return False
+        if self.start_date and now < self.start_date:
+            return False
+        if self.end_date and now > self.end_date:
+            return False
+        # Also check usage limit globally
+        if self.usage_limit is not None:
+            if self.get_total_usage_count() >= self.usage_limit:
+                return False
+        return True
+
+    def get_total_usage_count(self):
+        """
+        Total times discount has been used (aggregated from DiscountUsage).
+        """
+        return self.usage.count()
+
+    def get_user_usage_count(self, user):
+        """
+        Return how many times `user` has used this discount.
+        """
+        if not user or not user.is_authenticated:
+            return 0
+        return self.usage.filter(used_by=user).count()
+
+    def applies_to_product(self, product):
+        """
+        Determine whether this discount is applicable to the given product/variant.
+        - If variants M2M includes a variant matching -> True
+        - If products M2M includes the product -> True
+        - If categories intersects product.categories -> True
+        - If collections intersects product.collections -> True
+        - If none of the above target sets are populated -> treated as GLOBAL -> True
+        """
+        # Quick rejection if discount is not active now
+        if not self.is_active():
+            return False
+
+        # If variants specified, check them first (most specific)
+        if self.variants.exists():
+            # product may have variants; if product passed is a ProductVariant instance, handle accordingly
+            try:
+                # If product passed is a ProductVariant instance
+                if isinstance(product, ProductVariant):
+                    return self.variants.filter(pk=product.pk).exists()
+                # else check if any variant of the product is targeted
+                return self.variants.filter(parentVariant__products__pk=product.pk).exists() or False
+            except Exception:
+                # In case product model doesn't have expected relations, continue checks
+                pass
+
+        # If products explicitly listed
+        if self.products.exists():
+            if getattr(product, "id", None) and self.products.filter(pk=product.id).exists():
+                return True
+
+        # Check categories
+        if self.categories.exists():
+            # assumes Product has ManyToMany named `productCategory` (per your schema)
+            product_categories = getattr(product, "productCategory", None)
+            if product_categories is not None:
+                if self.categories.filter(pk__in=product_categories.all().values_list("pk", flat=True)).exists():
+                    return True
+
+        # Check collections
+        if self.collections.exists():
+            product_collections = getattr(product, "productCollection", None)
+            if product_collections is not None:
+                if self.collections.filter(pk__in=product_collections.all().values_list("pk", flat=True)).exists():
+                    return True
+
+        # If none of the target sets are configured, treat discount as global
+        if not (self.products.exists() or self.variants.exists() or self.categories.exists() or self.collections.exists()):
+            return True
+
+        return False
+
+    def calculate_discounted_price(self, original_price: Decimal) -> Decimal:
+        """
+        Given an original price (Decimal), return the price after applying this discount.
+        This method does not check applicability rules (call `applies_to_product` first).
+        """
+        if not isinstance(original_price, Decimal):
+            original_price = Decimal(original_price)
+
+        if self.discount_type == self.DISCOUNT_TYPE_PERCENT:
+            discount_amount = (original_price * (self.value / Decimal("100.00"))).quantize(original_price.as_tuple())
+            final = original_price - discount_amount
+        else:  # fixed
+            final = original_price - self.value
+
+        # Prevent negative price
+        if final < Decimal("0.00"):
+            final = Decimal("0.00")
+
+        # Optionally round to 2 decimal places for currency
+        return final.quantize(Decimal("0.01"))
+
+    def can_be_used_by(self, user):
+        """
+        Check per-user usage limits (does not decrement usage).
+        """
+        if not self.is_active():
+            return False
+        if self.usage_limit_per_user is not None:
+            if self.get_user_usage_count(user) >= self.usage_limit_per_user:
+                return False
+        return True
+
+
+class DiscountUsage(models.Model):
+    """
+    Record each usage of a discount for auditing and enforcement of limits.
+    Create one record when a discount is successfully applied to an order/checkout.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    discount = models.ForeignKey(
+        Discount, on_delete=models.CASCADE, related_name="usage", help_text="Discount that was used."
+    )
+    used_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, help_text="User who used it.")
+    order_reference = models.CharField(max_length=255, blank=True, null=True,
+                                       help_text="Optional: store order id/invoice reference for audit.")
+    timestamp = models.DateTimeField(auto_now_add=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True,
+                                 help_text="Monetary amount discounted in this usage (for audit).")
+
+    class Meta:
+        ordering = ("-timestamp",)
+        indexes = [
+            models.Index(fields=["discount"]),
+            models.Index(fields=["used_by"]),
+        ]
+
+    def __str__(self):
+        user_label = self.used_by.get_full_name() if self.used_by else "Anonymous"
+        return f"{self.discount} used by {user_label} at {self.timestamp:%Y-%m-%d %H:%M}"
+
