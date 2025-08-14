@@ -1,3 +1,4 @@
+from datetime import timedelta
 import os
 from pathlib import Path
 from decouple import config, Csv
@@ -6,7 +7,7 @@ from decouple import config, Csv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment flags
-LOCAL_ENV = config("LOCAL_ENV", default=False, cast=bool)
+LOCAL_ENV = config("LOCAL_ENV", default=True, cast=bool)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config("SECRET_KEY")
@@ -23,6 +24,7 @@ HOST = config("DB_HOST", default="localhost")
 # Application definition
 INSTALLED_APPS = [
     'jazzmin',
+    'ckeditor',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -31,6 +33,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'core_a.apps.CoreAConfig',
     'core_p.apps.CorePConfig',
+    'core_b.apps.CoreBConfig',
+    'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
 ]
 
@@ -117,6 +122,13 @@ CORS_ALLOWED_ORIGINS = [
     'http://68.183.111.2'  # ✅ No trailing slash here
 ]
 
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # or use Memcached / Redis in production
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
 
 
 # Jazz min Settings
@@ -125,10 +137,10 @@ JAZZMIN_SETTINGS = {
     "site_title": "Admin || DoorBix",
 
     # Title on the login screen (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_header": "Library",
+    "site_header": "DoorBix",
 
     # Title on the brand (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_brand": "Library",
+    "site_brand": "DoorBix",
 
     # Logo to use for your site, must be present in static files, used for brand on top left
     "site_logo": "books/img/logo.png",
@@ -259,4 +271,84 @@ JAZZMIN_SETTINGS = {
     "changeform_format_overrides": {"auth.user": "collapsible", "auth.group": "vertical_tabs"},
     # Add a language dropdown into the admin
     # "language_chooser": True,
+}
+
+
+CKEDITOR_CONFIGS = {
+    'default': {
+        'skin': 'moono',
+        # 'skin': 'office2013',
+        'toolbar_Basic': [
+            ['Source', '-', 'Bold', 'Italic']
+        ],
+        'toolbar_YourCustomToolbarConfig': [
+            {'name': 'document', 'items': ['Source', '-', 'Save', 'NewPage', 'Preview', 'Print', '-', 'Templates']},
+            {'name': 'clipboard', 'items': ['Cut', 'Copy', 'Paste', 'PasteText', 'PasteFromWord', '-', 'Undo', 'Redo']},
+            {'name': 'editing', 'items': ['Find', 'Replace', '-', 'SelectAll']},
+            {'name': 'forms',
+             'items': ['Form', 'Checkbox', 'Radio', 'TextField', 'Textarea', 'Select', 'Button', 'ImageButton',
+                       'HiddenField']},
+            '/',
+            {'name': 'basicstyles',
+             'items': ['Bold', 'Italic', 'Underline', 'Strike', 'Subscript', 'Superscript', '-', 'RemoveFormat']},
+            {'name': 'paragraph',
+             'items': ['NumberedList', 'BulletedList', '-', 'Outdent', 'Indent', '-', 'Blockquote', 'CreateDiv', '-',
+                       'JustifyLeft', 'JustifyCenter', 'JustifyRight', 'JustifyBlock', '-', 'BidiLtr', 'BidiRtl',
+                       'Language']},
+            {'name': 'links', 'items': ['Link', 'Unlink', 'Anchor']},
+            {'name': 'insert',
+             'items': ['Image', 'Flash', 'Table', 'HorizontalRule', 'Smiley', 'SpecialChar', 'PageBreak', 'Iframe']},
+            '/',
+            {'name': 'styles', 'items': ['Styles', 'Format', 'Font', 'FontSize']},
+            {'name': 'colors', 'items': ['TextColor', 'BGColor']},
+            {'name': 'tools', 'items': ['Maximize', 'ShowBlocks']},
+            {'name': 'about', 'items': ['About']},
+            '/',  # put this to force next toolbar on new line
+            {'name': 'yourcustomtools', 'items': [
+                # put the name of your editor.ui.addButton here
+                'Preview',
+                'Maximize',
+
+            ]},
+        ],
+        'toolbar': 'YourCustomToolbarConfig',  # put selected toolbar config here
+        # 'toolbarGroups': [{ 'name': 'document', 'groups': [ 'mode', 'document', 'doctools' ] }],
+        # 'height': 291,
+        # 'width': '100%',
+        # 'filebrowserWindowHeight': 725,
+        # 'filebrowserWindowWidth': 940,
+        # 'toolbarCanCollapse': True,
+        # 'mathJaxLib': '//cdn.mathjax.org/mathjax/2.2-latest/MathJax.js?config=TeX-AMS_HTML',
+        'tabSpaces': 4,
+        'extraPlugins': ','.join([
+            'uploadimage', # the upload image feature
+            # your extra plugins here
+            'div',
+            'autolink',
+            'autoembed',
+            'embedsemantic',
+            'autogrow',
+            # 'devtools',
+            'widget',
+            'lineutils',
+            'clipboard',
+            'dialog',
+            'dialogui',
+            'elementspath'
+        ]),
+    }
+}
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
