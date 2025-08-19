@@ -1,3 +1,4 @@
+from uuid import UUID
 from rest_framework.response import Response
 from rest_framework import viewsets, status
 from django.shortcuts import get_object_or_404
@@ -64,16 +65,53 @@ class ProductViewSet(viewsets.ViewSet):
         return Response(data)
 
     def retrieve(self, request, pk=None):
-        slug = iri_to_uri(pk)
-        cache_key = f"products:detail:{slug}"
+        """
+        Retrieve product by either UUID or slug.
+        Supports caching for performance.
+        Allows returning full or mini data via ?view=mini|full
+        """
+        identifier = iri_to_uri(pk)
+        view_type = request.query_params.get("view", "full")  # default is full
+    
+        # Cache key depends on identifier + view type
+        cache_key = f"products:detail:{identifier}:{view_type}"
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
-
-        product = get_object_or_404(Product, productSlug=slug)
-        data = ProductSerializer(product).data
+    
+        # Try to detect if pk is a UUID
+        try:
+            uuid_obj = UUID(str(identifier))
+            filter_kwargs = {"id": uuid_obj}
+        except (ValueError, TypeError):
+            filter_kwargs = {"productSlug": identifier}
+    
+        # Fetch product
+        product = get_object_or_404(Product, **filter_kwargs)
+    
+        # Choose serializer depending on view type
+        if view_type == "mini":
+            data = {
+                "id": str(product.id),   # UUID string
+                "slug": product.productSlug,
+                "name": product.productName,
+                "price": product.productPrice,
+                "image": (
+                    request.build_absolute_uri(product.productImages.first().image.url)
+                    if product.productImages.exists() and product.productImages.first().image
+                    else None
+                ),
+                "qty": 1,  # default quantity for cart/cart-like usage
+            }
+        else:
+            data = ProductSerializer(product).data  # serializer.data
+    
+        # Cache data for 5 minutes
         cache.set(cache_key, data, timeout=300)
+    
         return Response(data, status=status.HTTP_200_OK)
+
+
 
     def _parse_int(self, value, field_name):
         try:
