@@ -36,19 +36,19 @@ class OrderAddressSerializer(serializers.ModelSerializer):
     """
     Serializer for order addresses (shipping/billing).
     """
+    email = serializers.EmailField()
 
     class Meta:
         model = OrderAddress
         fields = [
-            "id", "address_type", "first_name", "last_name", "phone",
+            "id", "address_type", "first_name", "last_name", "phone","email",
             "line1", "line2", "city", "state", "postal_code", "country"
         ]
         read_only_fields = ["id"]
 
-
 class OrderSerializer(serializers.ModelSerializer):
     """
-    Main serializer for creating and retrieving orders.
+    Serializer for creating and retrieving orders.
     Handles nested items and addresses.
     """
     items = OrderItemSerializer(many=True, write_only=True)
@@ -57,12 +57,58 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            "id", "status", "subtotal_amount", "total_amount",
-            "items", "addresses" # ✅ output
+            "id", "status", "user", "subtotal_amount", "total_amount",
+            "items", "addresses"
         ]
         read_only_fields = [
             "id", "status", "created_at", "updated_at",
-            "subtotal_amount", "total_amount",
+            "subtotal_amount", "total_amount", "user"  # user should be readonly
         ]
 
-    
+    def create(self, validated_data):
+        request = self.context.get("request")
+
+        # Extract nested data
+        items_data = validated_data.pop("items", [])
+        addresses_data = validated_data.pop("addresses", [])
+
+        # ✅ Assign user only if authenticated
+        user = request.user if request and request.user.is_authenticated else None
+
+        # Create Order
+        order = Order.objects.create(user=user, **validated_data)
+
+        subtotal = 0
+
+        # Create Order Items
+        for item_data in items_data:
+            product_id = item_data.pop("product_id")
+            quantity = item_data.get("quantity", 1)
+
+            try:
+                product = Product.objects.get(id=product_id)
+            except Product.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"items": f"Product with id {product_id} does not exist."}
+                )
+
+            order_item = OrderItem.objects.create(
+                order=order,
+                product_id=product_id,
+                name=product.productName,
+                quantity=quantity,
+                unit_price=product.productPrice,
+                total_price=product.productPrice * quantity
+            )
+            subtotal += order_item.total_price
+
+        # Create Addresses
+        for addr_data in addresses_data:
+            OrderAddress.objects.create(order=order, **addr_data)
+
+        # Update totals
+        order.subtotal_amount = subtotal
+        order.total_amount = subtotal  # if tax/shipping, update here
+        order.save()
+
+        return order

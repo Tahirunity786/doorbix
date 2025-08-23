@@ -52,7 +52,7 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Order {self.order_id} ({self.get_status_display()})"
+        return f"Order {self.id} ({self.get_status_display()})"
 
 
 
@@ -93,7 +93,7 @@ class OrderAddress(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.get_address_type_display()} Address for Order {self.order_id}"
+        return f"{self.get_address_type_display()} Address for Order {self.order.id}"
 
 class OrderItem(models.Model):
     order = models.ForeignKey(
@@ -117,4 +117,4 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.quantity} x {self.name} (Order {self.order_id})"
+        return f"{self.quantity} x {self.name} (Order {self.order.id})"

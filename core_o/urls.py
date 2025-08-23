@@ -1,10 +1,10 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
-from core_o.views import OrderPlacer
+from core_o.views import OrderPlacer,OrderPlacerCompactor
 
 router  = DefaultRouter()
 
-# router.register(r'orders', OrderPlacer, basename='orders')
+router.register(r'orders', OrderPlacerCompactor, basename='orders')
 
 
 urlpatterns = [
