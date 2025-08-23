@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'core_a.apps.CoreAConfig',
     'core_p.apps.CorePConfig',
+    'core_o.apps.CoreOConfig',
     'core_b.apps.CoreBConfig',
     'rest_framework',
     'rest_framework_simplejwt',
