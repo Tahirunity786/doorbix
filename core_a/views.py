@@ -46,6 +46,7 @@ class UserViewSet(viewsets.ViewSet):
                 "user": {
                     "id": user.id,
                     "username": user.username,
+                    "email": user.email,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
                 },
@@ -82,9 +83,10 @@ class UserViewSet(viewsets.ViewSet):
         tokens = create_jwt_token(user)
 
         return Response({
-            "user": {
+           "user": {
                 "id": user.id,
                 "username": user.username,
+                "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
             },
