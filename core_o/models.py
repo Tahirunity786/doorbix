@@ -6,10 +6,10 @@ from django.utils import timezone
 from django.core.validators import RegexValidator
 
 
-ISO_COUNTRY_VALIDATOR = RegexValidator(
-    regex=r"^[A-Z]{2}$",
-    message="Use ISO 3166-1 alpha-2 uppercase country code."
-)
+# ISO_COUNTRY_VALIDATOR = RegexValidator(
+#     regex=r"^[A-Z]{2}$",
+#     message="Use ISO 3166-1 alpha-2 uppercase country code."
+# )
 
 class Order(models.Model):
     class Status(models.TextChoices):
@@ -25,7 +25,8 @@ class Order(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="orders",
-        db_index=True
+        db_index=True,
+        null=True, blank=True 
     )
 
     # Totals
@@ -70,17 +71,17 @@ class OrderAddress(models.Model):
     )
 
     address_type = models.CharField(max_length=3, choices=AddressType.choices, db_index=True)
-    first_name    = models.CharField(max_length=120)
-    last_name    = models.CharField(max_length=120)
-    # email        = models.EmailField(max_length=255, db_index=True)
-    phone        = models.CharField(max_length=20, blank=True)
+    first_name    = models.CharField(max_length=120, default="")
+    last_name    = models.CharField(max_length=120, default="")
+    email        = models.EmailField(max_length=255, db_index=True, default="")
+    phone        = models.CharField(max_length=20, blank=True, default="")
 
-    line1        = models.CharField(max_length=120)
-    line2        = models.CharField(max_length=120, blank=True)
-    city         = models.CharField(max_length=80)
-    state        = models.CharField(max_length=80, blank=True)
-    postal_code  = models.CharField(max_length=20, db_index=True)
-    country      = models.CharField(max_length=2, validators=[ISO_COUNTRY_VALIDATOR], db_index=True)
+    line1        = models.CharField(max_length=120, default="")
+    line2        = models.CharField(max_length=120, blank=True, default="")
+    city         = models.CharField(max_length=80, default="")
+    state        = models.CharField(max_length=80, blank=True, default="")
+    postal_code  = models.CharField(max_length=20, db_index=True, default="")
+    country      = models.CharField(max_length=50, db_index=True, default="")
 
     created_at = models.DateTimeField(default=timezone.now)
 

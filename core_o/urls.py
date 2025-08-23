@@ -4,10 +4,11 @@ from core_o.views import OrderPlacer
 
 router  = DefaultRouter()
 
-router.register(r'orders', OrderPlacer, basename='orders')
+# router.register(r'orders', OrderPlacer, basename='orders')
 
 
 urlpatterns = [
     path('', include(router.urls)),
     # Additional paths can be added here
+    path('place-order/', OrderPlacer.as_view(), name='place-order'),
 ]

@@ -1,24 +1,42 @@
 from rest_framework import serializers
+from django.db import transaction
 from .models import Order, OrderItem, OrderAddress
+from core_p.models import Product
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    product_id = serializers.UUIDField(write_only=True)
+
     class Meta:
         model = OrderItem
         fields = ["id", "product_id", "name", "quantity", "unit_price", "total_price"]
-        read_only_fields = ["id", "total_price"]
-
-    def validate_quantity(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Quantity must be greater than zero.")
-        return value
+        read_only_fields = ["id", "name", "unit_price", "total_price"]
 
     def create(self, validated_data):
-        validated_data["total_price"] = validated_data["unit_price"] * validated_data["quantity"]
+        # extract product_id
+        product_id = validated_data.pop("product_id")
+        quantity = validated_data.get("quantity", 1)
+
+        # get product from DB
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            raise serializers.ValidationError(f"Product with id {product_id} does not exist.")
+
+        # populate fields from Product
+        validated_data["name"] = product.productName
+        validated_data["unit_price"] = product.productPrice
+        validated_data["total_price"] = product.productPrice * quantity
+        validated_data["product_id"] = product.id  # FK assignment
+
         return super().create(validated_data)
 
 
 class OrderAddressSerializer(serializers.ModelSerializer):
+    """
+    Serializer for order addresses (shipping/billing).
+    """
+
     class Meta:
         model = OrderAddress
         fields = [
@@ -29,44 +47,22 @@ class OrderAddressSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    items = OrderItemSerializer(many=True)
-    addresses = OrderAddressSerializer(many=True)
+    """
+    Main serializer for creating and retrieving orders.
+    Handles nested items and addresses.
+    """
+    items = OrderItemSerializer(many=True, write_only=True)
+    addresses = OrderAddressSerializer(many=True, write_only=True)
 
     class Meta:
         model = Order
         fields = [
-            "id", "user", "subtotal_amount", "shipping_amount", "tax_amount",
-            "discount_amount", "total_amount", "currency", "status",
-            "payment_reference", "created_at", "updated_at", "items", "addresses"
+            "id", "status", "subtotal_amount", "total_amount",
+            "items", "addresses" # ✅ output
         ]
-        read_only_fields = ["id", "status", "user", "created_at", "updated_at", 
-                            "subtotal_amount", "total_amount"]
+        read_only_fields = [
+            "id", "status", "created_at", "updated_at",
+            "subtotal_amount", "total_amount",
+        ]
 
-    def create(self, validated_data):
-        from django.db import transaction
-
-        items_data = validated_data.pop("items", [])
-        addresses_data = validated_data.pop("addresses", [])
-
-        user = self.context["request"].user
-        validated_data["user"] = user
-
-        with transaction.atomic():
-            order = Order.objects.create(**validated_data)
-
-            subtotal = 0
-            for item_data in items_data:
-                total_price = item_data["unit_price"] * item_data["quantity"]
-                subtotal += total_price
-                OrderItem.objects.create(order=order, total_price=total_price, **item_data)
-
-            for address_data in addresses_data:
-                OrderAddress.objects.create(order=order, **address_data)
-
-            order.subtotal_amount = subtotal
-            order.total_amount = (
-                subtotal + order.shipping_amount + order.tax_amount - order.discount_amount
-            )
-            order.save(update_fields=["subtotal_amount", "total_amount"])
-
-        return order
+    
