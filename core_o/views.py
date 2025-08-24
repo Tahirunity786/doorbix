@@ -147,24 +147,39 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
             Prefetch("items", queryset=OrderItem.objects.all()),
             Prefetch("addresses", queryset=OrderAddress.objects.all()),
         )
-
+    
         if request.user.is_authenticated:
             order = qs.filter(id=pk, user=request.user).first()
         else:
             order = qs.filter(id=pk).first()
-
+    
         if not order:
             return Response(
                 {"detail": "Order not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
-
+    
+        # 🔹 Build items list
+        items_data = [
+            {
+                "id": str(item.id),
+                "product_id": str(item.product_id),
+                "name": item.name,
+                "quantity": item.quantity,
+                "unit_price": float(item.unit_price),
+                "total_price": float(item.total_price),
+            }
+            for item in order.items.all()
+        ]
+    
         data = {
             "id": str(order.id),
             "status": order.get_status_display(),
-            "total_amount": order.total_amount,
+            "total_amount": float(order.total_amount),
             "currency": order.currency,
             "items_count": order.items.count(),
+            "items": items_data,  # ✅ include all items
             "addresses": [str(addr) for addr in order.addresses.all()],
         }
         return Response(data, status=status.HTTP_200_OK)
+    
