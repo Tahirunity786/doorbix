@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework import status
@@ -28,23 +28,30 @@ class OrderPlacer(APIView):
             # =============================
             if order.user and order.user.is_authenticated:
                 discount_percent = getattr(settings, "SUBSCRIBED_USER_DISCOUNT", 0)
-
+            
                 try:
                     discount_percent = int(discount_percent)  # ensure integer
                 except ValueError:
                     discount_percent = 0
-
-                if discount_percent > 0:
-                    # discount = (subtotal * discount%) / 100
-                    discount_value = (order.subtotal_amount * Decimal(discount_percent)) / Decimal(100)
-
-                    # Ensure it’s rounded to 2 decimals (since DecimalField has 2 decimal places)
-                    discount_value = discount_value.quantize(Decimal("0.01"))
-
+            
+                # If discount percent is configured OR you want to apply 0.97 fixed discount
+                if discount_percent > 0 or discount_percent == 97:
+                    if discount_percent == 97:  
+                        # Apply fixed 0.97 (97% discount)
+                        discount_value = (order.subtotal_amount * Decimal("0.97"))
+                    else:
+                        # Apply normal percentage discount
+                        discount_value = (order.subtotal_amount * Decimal(discount_percent)) / Decimal(100)
+            
+                    # Round to nearest integer (87.22 -> 87, 86.69 -> 87)
+                    discount_value = discount_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            
                     order.discount_amount = discount_value
-                    order.total_amount = (order.subtotal_amount + order.shipping_amount + order.tax_amount) - discount_value
+                    order.total_amount = (
+                        order.subtotal_amount + order.shipping_amount + order.tax_amount
+                    ) - discount_value
+            
                     order.save(update_fields=["discount_amount", "total_amount"])
-
             # =============================
             #   EMAIL SENDING
             # =============================
@@ -73,6 +80,7 @@ class OrderPlacer(APIView):
                                     "name": item.name,
                                     "quantity": item.quantity,
                                     "price": item.total_price,
+                                    "discount": item.discount_amount,
                                 }
                                 for item in order.items.all()
                             ],
@@ -166,8 +174,9 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
                 "product_id": str(item.product_id),
                 "name": item.name,
                 "quantity": item.quantity,
-                "unit_price": float(item.unit_price),
-                "total_price": float(item.total_price),
+                "unit_price": item.unit_price,
+                "total_price": item.total_price,
+                
             }
             for item in order.items.all()
         ]
@@ -176,6 +185,7 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
             "id": str(order.id),
             "status": order.get_status_display(),
             "total_amount": float(order.total_amount),
+            "discount_amount": order.discount_amount,
             "currency": order.currency,
             "items_count": order.items.count(),
             "items": items_data,  # ✅ include all items
