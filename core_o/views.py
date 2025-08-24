@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework import status
@@ -7,27 +8,109 @@ from django.db.models import Prefetch
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
 from .models import Order, OrderItem, OrderAddress
 from .serializers import OrderSerializer
-
+from django.core.mail import send_mail
+from django.conf import settings
+from django.utils import timezone
+from django.template.loader import render_to_string
+from django.core.mail import EmailMultiAlternatives
 
 class OrderPlacer(APIView):
-    permission_classes = [AllowAny]  # guest + auth both can place
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = OrderSerializer(data=request.data, context={"request": request})
         
         if serializer.is_valid():
-            order = serializer.save()  # no need to pass user manually, serializer handles it
+            order = serializer.save()
+
+            # =============================
+            #  APPLY DISCOUNT FOR AUTH USERS
+            # =============================
+            if order.user and order.user.is_authenticated:
+                discount_percent = getattr(settings, "SUBSCRIBED_USER_DISCOUNT", 0)
+
+                try:
+                    discount_percent = int(discount_percent)  # ensure integer
+                except ValueError:
+                    discount_percent = 0
+
+                if discount_percent > 0:
+                    # discount = (subtotal * discount%) / 100
+                    discount_value = (order.subtotal_amount * Decimal(discount_percent)) / Decimal(100)
+
+                    # Ensure it’s rounded to 2 decimals (since DecimalField has 2 decimal places)
+                    discount_value = discount_value.quantize(Decimal("0.01"))
+
+                    order.discount_amount = discount_value
+                    order.total_amount = (order.subtotal_amount + order.shipping_amount + order.tax_amount) - discount_value
+                    order.save(update_fields=["discount_amount", "total_amount"])
+
+            # =============================
+            #   EMAIL SENDING
+            # =============================
+            recipient_emails = list(
+                set(
+                    addr.email.strip()
+                    for addr in order.addresses.all()
+                    if addr.email
+                )
+            )
+
+            if recipient_emails:
+                try:
+                    context = {
+                        "user": {"name": order.user.first_name if order.user else "Guest"},
+                        "order": {
+                            "order_number": order.order_number,
+                            "id": order.id,
+                            "subtotal": order.subtotal_amount,
+                            "shipping": order.shipping_amount,
+                            "discount": order.discount_amount,
+                            "total": order.total_amount,
+                            "currency": order.currency,
+                            "items": [
+                                {
+                                    "name": item.name,
+                                    "quantity": item.quantity,
+                                    "price": item.total_price,
+                                }
+                                for item in order.items.all()
+                            ],
+                            "tracking_url": f"https://doorbix.com/orders/{order.id}/track/",
+                        },
+                        "current_year": timezone.now().year,
+                    }
+
+                    html_content = render_to_string("email/order.html", context)
+                    text_content = f"Thank you for your order {order.order_number}. Total: {order.total_amount} {order.currency}"
+
+                    email = EmailMultiAlternatives(
+                        subject=f"Your Order Confirmation: {order.order_number}",
+                        body=text_content,
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        to=recipient_emails,
+                    )
+                    email.attach_alternative(html_content, "text/html")
+                    email.send(fail_silently=False)
+
+                except Exception as e:
+                    print(f"⚠ Email sending failed for order {order.id}: {e}")
+            else:
+                print(f"Order {order.order_number} placed successfully (⚠ no email found)")
 
             return Response(
                 {
                     "message": "Order placed successfully!",
                     "order_id": order.id,
-                    "guest_order": order.user is None  # quick flag
+                    "emails_sent_to": recipient_emails,
+                    "guest_order": order.user is None,
+                    "discount_applied": str(order.discount_amount),
                 },
                 status=status.HTTP_201_CREATED,
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class OrderPlacerCompactor(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
@@ -60,20 +143,15 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
         - Guest: fetch order by ID only
         - Authenticated: fetch order by ID and request.user
         """
-        print("I'm here")
         qs = Order.objects.select_related("user").prefetch_related(
             Prefetch("items", queryset=OrderItem.objects.all()),
             Prefetch("addresses", queryset=OrderAddress.objects.all()),
         )
-        print("I'm here 2")
 
         if request.user.is_authenticated:
             order = qs.filter(id=pk, user=request.user).first()
-            print("I'm here inner")
         else:
             order = qs.filter(id=pk).first()
-            print("I'm here inner 2")
-        print("I'm here 3")
 
         if not order:
             return Response(
@@ -81,7 +159,6 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        print("I'm here 4")
         data = {
             "id": str(order.id),
             "status": order.get_status_display(),

@@ -56,7 +56,7 @@ ROOT_URLCONF = 'processor.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'template')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -353,3 +353,16 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp-relay.brevo.com'  # Brevo SMTP server
+EMAIL_PORT = 2525  # Use 587 for TLS, or 465 for SSL
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
+EMAIL_HOST_USER = "957c61001@smtp-brevo.com"  # Your Brevo login email
+EMAIL_HOST_PASSWORD = os.getenv("SMTP_API") # Your Brevo SMTP Key
+DEFAULT_FROM_EMAIL = 'DoorBix <work@doorbix.com>'
+CURRENCY="AED"
+
+SUBSCRIBED_USER_DISCOUNT=3

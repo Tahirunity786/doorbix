@@ -21,6 +21,9 @@ class Order(models.Model):
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, unique=True, db_index=True)
 
+    # New friendly order ID
+    order_number = models.CharField(max_length=20, unique=True, editable=False, db_index=True, blank=True, null=True)
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -28,7 +31,7 @@ class Order(models.Model):
         db_index=True,
         null=True, blank=True 
     )
-
+    
     # Totals
     subtotal_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     shipping_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -52,8 +55,20 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Order {self.id} ({self.get_status_display()})"
+        return f"Order {self.order_number} ({self.get_status_display()})"
 
+    def save(self, *args, **kwargs):
+        if not self.order_number:
+            # Example: DBX-20250824-0001
+            today = timezone.now().strftime("%Y%m%d")
+            prefix = "DBX"
+            
+            # Count orders for today to generate a sequence
+            count_today = Order.objects.filter(created_at__date=timezone.now().date()).count() + 1
+            
+            self.order_number = f"{prefix}-{today}-{count_today:04d}"
+        
+        super().save(*args, **kwargs)
 
 
 class OrderAddress(models.Model):
