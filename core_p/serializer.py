@@ -89,6 +89,7 @@ class MiniProductSerializer(serializers.ModelSerializer):
             'productComparePrice',
             'productImages',
             'productVariant',
+            'productStock',
         ]
 
         
