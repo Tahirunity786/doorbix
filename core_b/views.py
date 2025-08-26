@@ -1,12 +1,15 @@
-from rest_framework import status, viewsets
+import uuid
+from rest_framework import status, viewsets, generics
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
-from .models import BlogPost
+from django.http import Http404
+from .models import BlogPost, Comments
 from .serializer import (
     BlogPostListSerializer,
     BlogPostDetailSerializer,
-    BlogPostCreateSerializer
+    BlogPostCreateSerializer,
+    CommentSerializer
 )
 
 
@@ -72,3 +75,29 @@ class BlogPostViewSet(viewsets.ViewSet):
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class CommentListCreateView(generics.ListCreateAPIView):
+    """
+    GET -> List approved top-level comments for a blog post
+    POST -> Create a new top-level comment or reply
+    """
+
+    serializer_class = CommentSerializer
+
+    def get_queryset(self):
+        post_id = self.kwargs.get("id")
+        return (
+            Comments.objects.filter(
+                post_id=post_id,
+                is_approved=True,
+                comment_on_comment__isnull=True,
+            )
+            .select_related("post")
+            .prefetch_related("comments_set")
+            .order_by("-created_at")
+        )
+
+    def perform_create(self, serializer):
+        post_id = self.kwargs.get("id")
+        post = get_object_or_404(BlogPost, id=post_id)
+        serializer.save(post=post)

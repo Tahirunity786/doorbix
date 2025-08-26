@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import BlogPost, Category, Tags
+from .models import BlogPost, Category, Comments, Tags
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -69,3 +69,50 @@ class BlogPostCreateSerializer(serializers.ModelSerializer):
         if tags:
             post.blogTags.set(tags)
         return post
+
+
+class RecursiveField(serializers.Serializer):
+    """
+    Recursive serializer field for nested replies.
+    This allows comments -> replies -> replies (nested threading).
+    """
+    def to_representation(self, value):
+        serializer = self.parent.parent.__class__(value, context=self.context)
+        return serializer.data
+
+class CommentSerializer(serializers.ModelSerializer):
+    replies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comments
+        fields = [
+            "id",
+            "name",
+            "email",
+            "comment",
+            "comment_on_comment",
+            "created_at",
+            "replies",
+        ]
+        read_only_fields = ["id", "created_at", "replies"]
+
+    def get_replies(self, obj):
+        """
+        Return child comments (replies) of this comment.
+        Only approved comments are returned.
+        """
+        queryset = obj.comments_set.filter(is_approved=True).select_related("post")
+        return CommentSerializer(queryset, many=True, context=self.context).data
+
+    def validate(self, data):
+        """
+        Ensure reply belongs to the same blog post.
+        """
+        parent_comment = data.get("comment_on_comment")
+        if parent_comment:
+            post = self.context["view"].kwargs.get("post_id")
+            if str(parent_comment.post_id) != str(post):
+                raise serializers.ValidationError(
+                    {"comment_on_comment": "Reply must belong to the same blog post."}
+                )
+        return data
