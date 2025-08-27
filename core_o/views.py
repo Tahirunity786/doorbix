@@ -80,7 +80,6 @@ class OrderPlacer(APIView):
                                     "name": item.name,
                                     "quantity": item.quantity,
                                     "price": item.total_price,
-                                    "discount": item.discount_amount,
                                 }
                                 for item in order.items.all()
                             ],
