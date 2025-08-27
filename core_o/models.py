@@ -120,6 +120,7 @@ class OrderItem(models.Model):
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, unique=True, db_index=True)
 
     product_id = models.UUIDField(editable=False, db_index=True)  # could also be FK if products are local
+    product_SKU = models.CharField(max_length=255, default="") 
     name       = models.CharField(max_length=255)  # snapshot of product name
     quantity   = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)

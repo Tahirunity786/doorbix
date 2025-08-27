@@ -95,6 +95,7 @@ class OrderSerializer(serializers.ModelSerializer):
             order_item = OrderItem.objects.create(
                 order=order,
                 product_id=product_id,
+                product_SKU=product.productSKU,
                 name=product.productName,
                 quantity=quantity,
                 unit_price=product.productPrice,
