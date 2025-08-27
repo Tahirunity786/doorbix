@@ -90,7 +90,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "name",
             "email",
             "comment",
-            "comment_on_comment",
+            "comment_on_comment",  # nullable (None for top-level, filled for replies)
             "created_at",
             "replies",
         ]
@@ -98,21 +98,7 @@ class CommentSerializer(serializers.ModelSerializer):
 
     def get_replies(self, obj):
         """
-        Return child comments (replies) of this comment.
-        Only approved comments are returned.
+        Return approved child comments (replies).
         """
         queryset = obj.comments_set.filter(is_approved=True).select_related("post")
         return CommentSerializer(queryset, many=True, context=self.context).data
-
-    def validate(self, data):
-        """
-        Ensure reply belongs to the same blog post.
-        """
-        parent_comment = data.get("comment_on_comment")
-        if parent_comment:
-            post = self.context["view"].kwargs.get("post_id")
-            if str(parent_comment.post_id) != str(post):
-                raise serializers.ValidationError(
-                    {"comment_on_comment": "Reply must belong to the same blog post."}
-                )
-        return data

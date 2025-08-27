@@ -3,7 +3,7 @@ from rest_framework import status, viewsets, generics
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from rest_framework import serializers
 from .models import BlogPost, Comments
 from .serializer import (
     BlogPostListSerializer,
@@ -90,7 +90,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
             Comments.objects.filter(
                 post_id=post_id,
                 is_approved=True,
-                comment_on_comment__isnull=True,
+                comment_on_comment__isnull=True,  # only top-level
             )
             .select_related("post")
             .prefetch_related("comments_set")
@@ -100,4 +100,11 @@ class CommentListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         post_id = self.kwargs.get("id")
         post = get_object_or_404(BlogPost, id=post_id)
+
+        parent_comment = serializer.validated_data.get("comment_on_comment")
+        if parent_comment and parent_comment.post_id != post.id:
+            raise serializers.ValidationError(
+                {"comment_on_comment": "Reply must belong to the same blog post."}
+            )
+
         serializer.save(post=post)
