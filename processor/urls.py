@@ -9,6 +9,7 @@ urlpatterns = [
     path('api/product/', include('core_p.urls')),
     path('api/blog/', include('core_b.urls')),
     path('api/order/', include('core_o.urls')),
+    path('api/contact/', include('core_c.urls')),
 ]
 
 # Serve media and static files in development
