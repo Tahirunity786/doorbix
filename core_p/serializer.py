@@ -114,9 +114,7 @@ class ProductCollectionSerializer(serializers.ModelSerializer):
 
     def get_categories(self, obj):
         # Get distinct categories from related products
-        categories = ProductCategory.objects.filter(
-            products__in=obj.products.all()  # assuming Product model has FK `category`
-        ).distinct()
+        categories = ProductCategory.objects.all()
         return ProductCategorySerializer(categories, many=True).data
 
 
