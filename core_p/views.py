@@ -124,28 +124,39 @@ class ProductViewSet(viewsets.ViewSet):
 class CollectionViewset(viewsets.ViewSet):
 
     def list(self, request):
-        cache_key = "collections:list"
-        cached_data = cache.get(cache_key)
         product_quantity = request.query_params.get('quantity')
+        cache_key = f"collections:{product_quantity or 'list'}"
 
-        if cached_data:
+        # Return cached data if available
+        if cached_data := cache.get(cache_key):
             return Response(cached_data, status=status.HTTP_200_OK)
 
         try:
             collections = ProductCollection.objects.all()
+
             if product_quantity:
                 try:
                     quantity = int(product_quantity)
                     collections = collections[:quantity]
                 except ValueError:
-                    return Response({'error': 'Invalid quantity. Must be an integer.'}, status=400)
+                    return Response(
+                        {"error": "Invalid quantity. Must be an integer."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-            serializer = ProductCollectionSerializer(collections, many=True)
+            serializer = MiniCollectionSerializer(collections, many=True)
             data = serializer.data
+
+            # Cache for 5 minutes
             cache.set(cache_key, data, timeout=300)
+
             return Response(data, status=status.HTTP_200_OK)
+
         except Exception as e:
-            return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def retrieve(self, request, pk=None):
         slug = iri_to_uri(pk)

@@ -96,7 +96,8 @@ class MiniProductSerializer(serializers.ModelSerializer):
 # ----------- Product Collection Serializer -----------
 class ProductCollectionSerializer(serializers.ModelSerializer):
     collectionTags = PCTagSerializer(many=True)
-    products = MiniProductSerializer(many=True, read_only=True)  # Use Mini or Full Product Serializer
+    products = MiniProductSerializer(many=True, read_only=True)  
+    categories = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductCollection
@@ -107,8 +108,16 @@ class ProductCollectionSerializer(serializers.ModelSerializer):
             'collectionImage',
             'collectionDescription',
             'collectionTags',
-            'products'  # Include related products
+            'products',
+            'categories',  # ✅ new field
         ]
+
+    def get_categories(self, obj):
+        # Get distinct categories from related products
+        categories = ProductCategory.objects.filter(
+            products__in=obj.products.all()  # assuming Product model has FK `category`
+        ).distinct()
+        return ProductCategorySerializer(categories, many=True).data
 
 
 
