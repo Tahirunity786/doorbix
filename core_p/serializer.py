@@ -22,9 +22,17 @@ class PCTagSerializer(serializers.ModelSerializer):
 
 # ----------- Product Image Serializer -----------
 class ProductImageSerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField()  # ✅ tell DRF to use get_image
+
     class Meta:
         model = ProductImageSchema
         fields = ['id', 'image']
+
+    def get_image(self, obj):
+        if obj.image and hasattr(obj.image, "url"):
+            return obj.image.url  # relative URL like "/media/..."
+        return None
+
 
 
 # ----------- Recursive Variant Serializer -----------

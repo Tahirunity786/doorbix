@@ -1,9 +1,12 @@
 from uuid import UUID
 from rest_framework.response import Response
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, generics, filters
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.encoding import iri_to_uri
+from django_filters.rest_framework import DjangoFilterBackend
+
+from .filter import ProductFilter
 
 
 from .models import Product, ProductCategory, ProductCollection
@@ -177,3 +180,53 @@ class CollectionViewset(viewsets.ViewSet):
                 {"error": "Something went wrong", "details": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+
+# -------------------------------
+# SearchProduct API View
+# -------------------------------
+class SearchProduct(generics.ListAPIView):
+    """
+    API endpoint for searching and filtering products with cache based on filter keywords.
+    """
+
+    serializer_class = MiniProductSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_class = ProductFilter
+
+    ordering_fields = ["productName", "productPrice", "productCreatedAt"]
+    ordering = ["-productCreatedAt"]  # default ordering
+
+    def get_queryset(self):
+        """
+        Build queryset with caching. Cache key is based on all query parameters.
+        """
+
+        # ✅ Generate a unique cache key using query parameters
+        params = self.request.query_params.dict()  # convert to plain dict
+        ordering = self.request.query_params.get("ordering", "-productCreatedAt")
+        cache_key = "products:" + ":".join(f"{k}={v}" for k, v in sorted(params.items())) + f":ordering={ordering}"
+
+        # ✅ Try cache first
+        queryset = cache.get(cache_key)
+        if queryset:
+            return queryset
+
+        # ✅ Build optimized queryset
+        queryset = (
+            Product.objects.filter(productIsActive="published")
+            .select_related("productVariant")
+            .prefetch_related("productCategory", "productTags", "productImages")
+            .only(
+                    "id", "productName", "productDescription", "productSlug",
+                    "productPrice", "productComparePrice", "productStock",
+                    "productCreatedAt", "productVariant"
+                )
+
+        )
+
+        # ✅ Store in cache for 5 minutes
+        cache.set(cache_key, queryset, timeout=60 * 5)
+
+        return queryset
