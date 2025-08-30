@@ -190,7 +190,6 @@ class SearchProduct(generics.ListAPIView):
     """
     API endpoint for searching and filtering products with cache based on filter keywords.
     """
-
     serializer_class = MiniProductSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = ProductFilter
@@ -199,34 +198,41 @@ class SearchProduct(generics.ListAPIView):
     ordering = ["-productCreatedAt"]  # default ordering
 
     def get_queryset(self):
-        """
-        Build queryset with caching. Cache key is based on all query parameters.
-        """
-
-        # ✅ Generate a unique cache key using query parameters
-        params = self.request.query_params.dict()  # convert to plain dict
+        params = self.request.query_params.dict()
         ordering = self.request.query_params.get("ordering", "-productCreatedAt")
+        search = self.request.query_params.get("search")
+        search_type = self.request.query_params.get("type")  # "product" or "category"
+
+        # ✅ Generate cache key
         cache_key = "products:" + ":".join(f"{k}={v}" for k, v in sorted(params.items())) + f":ordering={ordering}"
 
-        # ✅ Try cache first
         queryset = cache.get(cache_key)
         if queryset:
             return queryset
 
-        # ✅ Build optimized queryset
+        # ✅ Base queryset
         queryset = (
             Product.objects.filter(productIsActive="published")
             .select_related("productVariant")
             .prefetch_related("productCategory", "productTags", "productImages")
             .only(
-                    "id", "productName", "productDescription", "productSlug",
-                    "productPrice", "productComparePrice", "productStock",
-                    "productCreatedAt", "productVariant"
-                )
-
+                "id", "productName", "productDescription", "productSlug",
+                "productPrice", "productComparePrice", "productStock",
+                "productCreatedAt", "productVariant"
+            )
         )
 
-        # ✅ Store in cache for 5 minutes
+        # ✅ Apply search logic
+        if search and search_type:
+            if search_type == "product":
+                queryset = queryset.filter(productName__icontains=search)
+            elif search_type == "category":
+                queryset = queryset.filter(productCategory__categoryName__icontains=search)
+
+        # ✅ Avoid duplicate products when filtering by categories (M2M)
+        queryset = queryset.distinct()
+
+        # ✅ Store in cache
         cache.set(cache_key, queryset, timeout=60 * 5)
 
         return queryset
