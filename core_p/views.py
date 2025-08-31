@@ -5,9 +5,9 @@ from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.encoding import iri_to_uri
 from django_filters.rest_framework import DjangoFilterBackend
-
-from .filter import ProductFilter
-
+from django.db.models import F, Value, FloatField, Q, When, Case, IntegerField
+from django.db.models.expressions import RawSQL
+from .filter import ProductFilter, normalize_query
 
 from .models import Product, ProductCategory, ProductCollection
 from .serializer import ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
@@ -186,58 +186,80 @@ class CollectionViewset(viewsets.ViewSet):
 # -------------------------------
 # SearchProduct API View
 # -------------------------------
+
+
 class SearchProduct(generics.ListAPIView):
-    """
-    API endpoint for searching and filtering products with cache based on filter keywords.
-    """
     serializer_class = MiniProductSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = ProductFilter
-
     ordering_fields = ["productName", "productPrice", "productCreatedAt"]
-    ordering = ["-productCreatedAt"]  # default ordering
+    ordering = ["-productCreatedAt"]
+
+    def _make_cache_key(self, params):
+        # deterministic key from sorted params
+        items = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return f"products:{items}"
 
     def get_queryset(self):
         params = self.request.query_params.dict()
-        ordering = self.request.query_params.get("ordering", "-productCreatedAt")
-        search = self.request.query_params.get("search")
-        search_type = self.request.query_params.get("type")  # "product" or "category"
+        search_raw = (self.request.query_params.get("search") or "").strip()
+        if not search_raw:
+            return Product.objects.filter(productIsActive="published")
 
-        # ✅ Generate cache key
-        # cache_key = "products:" + ":".join(f"{k}={v}" for k, v in sorted(params.items())) + f":ordering={ordering}"
+        parsed = normalize_query(search_raw)
+        numbers = parsed["numbers"]
+        tokens = parsed["tokens"]
 
-        # queryset = cache.get(cache_key)
-        # if queryset:
-        #     return queryset
-
-        # ✅ Base queryset
-        queryset = (
-            Product.objects.filter(productIsActive="published")
-            .select_related("productVariant")
+        base_qs = Product.objects.filter(productIsActive="published") \
+            .select_related("productVariant") \
             .prefetch_related("productCategory", "productTags", "productImages")
-            .only(
-                "id", "productName", "productDescription", "productSlug",
-                "productPrice", "productComparePrice", "productStock",
-                "productCreatedAt", "productVariant"
-            )
-        )
 
-        # ✅ Apply search logic
-        if search and search_type:
-            if search_type == "product":
-                
-                queryset = queryset.filter(productName__iexact=search)
-                if queryset.count() <=0:
-                    queryset = queryset.filter(productName__icontain=search)
-                
-            elif search_type == "category":
-                queryset = queryset.filter(productCategory__categoryName__icontain=search)
+        # cache_key = "search:" + "&".join(f"{k}={v}" for k, v in sorted(self.request.query_params.items()))
+        # cached_ids = cache.get(cache_key)
+        # if cached_ids:
+        #     preserved_order = Case(*[When(id=pk, then=pos) for pos, pk in enumerate(cached_ids)],
+        #                            default=Value(len(cached_ids)), output_field=IntegerField())
+        #     return Product.objects.filter(id__in=cached_ids).annotate(_order=preserved_order).order_by("_order")
 
+        # 1) Fulltext MATCH...AGAINST (natural or boolean mode)
+        match_sql = "MATCH(`productName`,`productDescription`) AGAINST (%s IN NATURAL LANGUAGE MODE)"
+        ft_qs = base_qs.annotate(ft_score=RawSQL(match_sql, (search_raw,))).filter(ft_score__gt=0).order_by("-ft_score")
+        ft_ids = list(ft_qs.values_list("id", flat=True))
 
-        # ✅ Avoid duplicate products when filtering by categories (M2M)
-        queryset = queryset.distinct()
+        # 2) If numbers detected, also try numeric matches (ids, price, sku, etc.)
+        numeric_ids = []
+        if numbers:
+            for n in numbers:
+                try:
+                    if '.' in n:
+                        val = float(n)
+                        numeric_ids.extend(list(base_qs.filter(productPrice=val).values_list('id', flat=True)))
+                    else:
+                        val = int(n)
+                        numeric_ids.extend(list(base_qs.filter(Q(id=val) | Q(productStock=val)).values_list('id', flat=True)))
+                except ValueError:
+                    continue
 
-        # ✅ Store in cache
-        # cache.set(cache_key, queryset, timeout=60 * 5)
+        # 3) Fallback: icontains across fields for tokens (gets punctuation-backed tokens too)
+        needed = 200
+        gathered = []
+        gathered.extend(ft_ids)
+        gathered.extend(x for x in numeric_ids if x not in gathered)
 
-        return queryset
+        if len(gathered) < needed:
+            # build icontains Q
+            q_filters = Q()
+            for t in tokens:
+                q_filters |= Q(productName__icontains=t) | Q(productDescription__icontains=t) | Q(productCategory__categoryName__icontains=t)
+            fallback_ids = list(base_qs.filter(q_filters).exclude(id__in=gathered).values_list("id", flat=True)[: needed - len(gathered)])
+            gathered.extend(fallback_ids)
+
+        if not gathered:
+            return base_qs.none()
+
+        preserved_order = Case(*[When(id=pk, then=pos) for pos, pk in enumerate(gathered)],
+                               default=Value(len(gathered)), output_field=IntegerField())
+        qs = Product.objects.filter(id__in=gathered).annotate(_order=preserved_order).order_by("_order")
+
+        # cache.set(cache_key, gathered, timeout=120)
+        return qs

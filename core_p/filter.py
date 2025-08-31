@@ -1,3 +1,4 @@
+import re
 from django_filters import rest_framework as filters
 from .models import Product
 
@@ -5,6 +6,19 @@ from .models import Product
 class UUIDInFilter(filters.BaseInFilter, filters.UUIDFilter):
     """Custom filter to allow multiple UUIDs (comma-separated or repeated params)."""
     pass
+
+
+NUM_RE = re.compile(r'[-+]?\d*\.?\d+')
+
+def normalize_query(q: str):
+    q = (q or "").strip()
+    q = q.lower()
+    # Keep several punctuation characters if you need them; replace others with space
+    # Here we replace most punctuation with space but keep dots and hyphens (we'll handle them)
+    q_clean = re.sub(r'[^\w\.\-\+]', ' ', q, flags=re.UNICODE)
+    tokens = [t for t in q_clean.split() if t]
+    numbers = NUM_RE.findall(q)  # list of numeric substrings like ['3.7','42']
+    return {"raw": q, "tokens": tokens, "numbers": numbers}
 
 
 class ProductFilter(filters.FilterSet):
