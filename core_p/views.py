@@ -225,7 +225,11 @@ class SearchProduct(generics.ListAPIView):
         # ✅ Apply search logic
         if search and search_type:
             if search_type == "product":
-                queryset = queryset.filter(productName__icontain=search)
+                
+                queryset = queryset.filter(productName__iexact=search)
+                if queryset.count() <=0:
+                    queryset = queryset.filter(productName__icontain=search)
+                
             elif search_type == "category":
                 queryset = queryset.filter(productCategory__categoryName__icontain=search)
 
