@@ -204,11 +204,11 @@ class SearchProduct(generics.ListAPIView):
         search_type = self.request.query_params.get("type")  # "product" or "category"
 
         # ✅ Generate cache key
-        cache_key = "products:" + ":".join(f"{k}={v}" for k, v in sorted(params.items())) + f":ordering={ordering}"
+        # cache_key = "products:" + ":".join(f"{k}={v}" for k, v in sorted(params.items())) + f":ordering={ordering}"
 
-        queryset = cache.get(cache_key)
-        if queryset:
-            return queryset
+        # queryset = cache.get(cache_key)
+        # if queryset:
+        #     return queryset
 
         # ✅ Base queryset
         queryset = (
@@ -238,6 +238,6 @@ class SearchProduct(generics.ListAPIView):
         queryset = queryset.distinct()
 
         # ✅ Store in cache
-        cache.set(cache_key, queryset, timeout=60 * 5)
+        # cache.set(cache_key, queryset, timeout=60 * 5)
 
         return queryset
