@@ -72,11 +72,27 @@ class Order(models.Model):
 
 
 class OrderAddress(models.Model):
+    class UAEStates(models.TextChoices):
+        # Example (You can expand this as per UAE states/emirates)
+        ABU_DHABI = "AD", "Abu Dhabi"
+        DUBAI = "DU", "Dubai"
+        SHARJAH = "SH", "Sharjah"
+        AJMAN = "AJ", "Ajman"
+        UMM_AL_QUWAIN = "UQ", "Umm Al-Quwain"
+        RAS_AL_KHAIMAH = "RK", "Ras Al-Khaimah"
+        FUJAIRAH = "FJ", "Fujairah"
+
     class AddressType(models.TextChoices):
-        BILLING  = "BIL", "Billing"
+        BILLING = "BIL", "Billing"
         SHIPPING = "SHP", "Shipping"
-        
-    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, unique=True, db_index=True)
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True
+    )
 
     order = models.ForeignKey(
         "Order",
@@ -85,20 +101,29 @@ class OrderAddress(models.Model):
         db_index=True
     )
 
-    address_type = models.CharField(max_length=3, choices=AddressType.choices, db_index=True)
-    first_name    = models.CharField(max_length=120, default="")
-    last_name    = models.CharField(max_length=120, default="")
-    email        = models.EmailField(max_length=255, db_index=True, default="")
-    phone        = models.CharField(max_length=20, blank=True, default="")
+    address_type = models.CharField(
+        max_length=3,
+        choices=AddressType.choices,
+        db_index=True
+    )
 
-    line1        = models.CharField(max_length=120, default="")
-    line2        = models.CharField(max_length=120, blank=True, default="")
-    city         = models.CharField(max_length=80, default="")
-    state        = models.CharField(max_length=80, blank=True, default="")
-    postal_code  = models.CharField(max_length=20, db_index=True, default="")
-    country      = models.CharField(max_length=50, db_index=True, default="")
+    fullName = models.CharField(max_length=120, default="")
+    email = models.EmailField(max_length=255, db_index=True, null=True, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
 
-    created_at = models.DateTimeField(default=timezone.now)
+    line1 = models.CharField("Address Line 1", max_length=120)
+    line2 = models.CharField("Address Line 2", max_length=120, blank=True)
+
+    city = models.CharField(max_length=80)
+    state = models.CharField(
+        max_length=80,
+        choices=UAEStates.choices,
+        blank=True
+    )
+    postal_code = models.CharField(max_length=20, db_index=True)
+    country = models.CharField(max_length=50, db_index=True, default="UAE")
+
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
 
     class Meta:
         db_table = "order_addresses"
@@ -106,10 +131,14 @@ class OrderAddress(models.Model):
             models.Index(fields=["address_type", "postal_code"]),
             models.Index(fields=["country", "postal_code"]),
         ]
+        verbose_name = "Order Address"
+        verbose_name_plural = "Order Addresses"
+        ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.get_address_type_display()} Address for Order {self.order.id}"
-
+        return f"{self.get_address_type_display()} Address - {self.fullName} ({self.city})"
+    
+    
 class OrderItem(models.Model):
     order = models.ForeignKey(
         "Order",

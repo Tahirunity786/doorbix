@@ -36,15 +36,16 @@ class OrderAddressSerializer(serializers.ModelSerializer):
     """
     Serializer for order addresses (shipping/billing).
     """
-    email = serializers.EmailField()
+    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = OrderAddress
         fields = [
-            "id", "address_type", "first_name", "last_name", "phone","email",
+            "id", "address_type", "fullName", "phone","email",
             "line1", "line2", "city", "state", "postal_code", "country"
         ]
         read_only_fields = ["id"]
+
 
 class OrderSerializer(serializers.ModelSerializer):
     """
