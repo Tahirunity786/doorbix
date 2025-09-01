@@ -103,6 +103,11 @@ class OrderSerializer(serializers.ModelSerializer):
                 total_price=product.productPrice * quantity
             )
             subtotal += order_item.total_price
+            if product.productStock < quantity:
+                raise serializers.ValidationError( {"items": f"Something went wrong, Please contact to our customer support."})
+            product.productStock = product.productStock - quantity
+            product.save()
+                
 
         # Create Addresses
         for addr_data in addresses_data:
