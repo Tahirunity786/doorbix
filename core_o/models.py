@@ -109,34 +109,25 @@ class OrderAddress(models.Model):
 
     fullName = models.CharField(max_length=120, default="")
     email = models.EmailField(max_length=255, db_index=True, null=True, blank=True)
-    phone = models.CharField(max_length=20, blank=True)
-
+    phone = models.CharField(max_length=20)
     line1 = models.CharField("Address Line 1", max_length=120)
     line2 = models.CharField("Address Line 2", max_length=120, blank=True)
-
-    city = models.CharField(max_length=80)
     state = models.CharField(
         max_length=80,
         choices=UAEStates.choices,
         blank=True
     )
-    postal_code = models.CharField(max_length=20, db_index=True)
     country = models.CharField(max_length=50, db_index=True, default="UAE")
-
     created_at = models.DateTimeField(default=timezone.now, editable=False)
 
     class Meta:
         db_table = "order_addresses"
-        indexes = [
-            models.Index(fields=["address_type", "postal_code"]),
-            models.Index(fields=["country", "postal_code"]),
-        ]
         verbose_name = "Order Address"
         verbose_name_plural = "Order Addresses"
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.get_address_type_display()} Address - {self.fullName} ({self.city})"
+        return f" Address - {self.fullName} ({self.state})"
     
     
 class OrderItem(models.Model):

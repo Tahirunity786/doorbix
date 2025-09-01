@@ -42,7 +42,7 @@ class OrderAddressSerializer(serializers.ModelSerializer):
         model = OrderAddress
         fields = [
             "id", "address_type", "fullName", "phone","email",
-            "line1", "line2", "city", "state", "postal_code", "country"
+            "line1", "line2", "state", "country"
         ]
         read_only_fields = ["id"]
 

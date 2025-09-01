@@ -111,7 +111,6 @@ class OrderPlacer(APIView):
                     "order_id": order.id,
                     "emails_sent_to": recipient_emails,
                     "guest_order": order.user is None,
-                    "discount_applied": str(order.discount_amount),
                 },
                 status=status.HTTP_201_CREATED,
             )
