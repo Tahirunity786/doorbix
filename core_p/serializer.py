@@ -1,6 +1,8 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import (
     Product,
+    ProductReview,
     ProductVariant,
     ProductImageSchema,
     ProductCategory,
@@ -9,8 +11,18 @@ from .models import (
     PCTags
 )
 
+User = get_user_model()
 
+# ----------- User Serializer -----------
+class UserSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
 
+    class Meta:
+        model = User
+        fields = ['full_name']
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() if hasattr(obj, "get_full_name") else f"{obj.first_name} {obj.last_name}".strip()
 
 
 # ----------- Tag Serializer -----------
@@ -33,7 +45,40 @@ class ProductImageSerializer(serializers.ModelSerializer):
             return obj.image.url  # relative URL like "/media/..."
         return None
 
+class ProductReviewSerializer(serializers.ModelSerializer):
+    rating_image = serializers.ImageField(required=False, allow_null=True)  # ✅ Optional image
+    product_id = serializers.UUIDField(write_only=True)  # ✅ Write-only field (not returned in response)
+    reviewd_by = UserSerializer(read_only=True)  # ✅ Always set from request.user
 
+    class Meta:
+        model = ProductReview
+        fields = [
+            'id',
+            'reviewd_by',
+            'review_to',
+            'product_id',
+            'rating_image',
+            'rating',
+            'rating_comment',
+        ]
+        read_only_fields = ["id", "reviewd_by", "review_to"]
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        product_id = validated_data.pop("product_id")
+        
+        # ✅ Get product instance safely
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            raise serializers.ValidationError({"product_id": "Invalid product ID."})
+
+        # ✅ Save review with auth user and product
+        return ProductReview.objects.create(
+            reviewd_by=request.user,
+            review_to=product,
+            **validated_data
+        )
 
 # ----------- Recursive Variant Serializer -----------
 class ProductVariantSerializer(serializers.ModelSerializer):
@@ -85,6 +130,8 @@ class MiniProductSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(format='hex', read_only=True)
     productImages = ProductImageSerializer(many=True, required=False)
     productVariant = ProductVariantSerializer(required=False)
+    average_rating = serializers.SerializerMethodField()  # optional: avg rating
+
 
     class Meta:
         model = Product  # Make sure to replace with your actual Product model
@@ -98,7 +145,13 @@ class MiniProductSerializer(serializers.ModelSerializer):
             'productImages',
             'productVariant',
             'productStock',
+            'average_rating',
         ]
+    def get_average_rating(self, obj):
+        reviews = obj.productreview_set.all()
+        if not reviews.exists():
+            return None
+        return round(sum([r.rating for r in reviews]) / reviews.count(), 2)
 
         
 # ----------- Product Collection Serializer -----------
@@ -147,6 +200,9 @@ class ProductSerializer(serializers.ModelSerializer):
     productCollection = ProductCollectionSerializer(many=True, required=False)
     productShipping = ProductShippingSerializer(required=False)
     productVariant = ProductVariantSerializer(required=False)
+    reviews = ProductReviewSerializer(many=True, read_only=True, source='productreview_set')
+    average_rating = serializers.SerializerMethodField()  # optional: avg rating
+
 
     class Meta:
         model = Product
@@ -170,6 +226,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'productVendor',
             'productVariant',
             'productSaleCountinue',
+            'reviews',
+            'average_rating',
         ]
+    def get_average_rating(self, obj):
+        reviews = obj.productreview_set.all()
+        if not reviews.exists():
+            return None
+        return round(sum([r.rating for r in reviews]) / reviews.count(), 2)
 
 

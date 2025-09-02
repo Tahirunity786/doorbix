@@ -60,14 +60,14 @@ class ProductVariant(models.Model):
     
 class ProductReview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    reviewd_by = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True)
+    reviewd_by = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True, null=True, blank=True)
     review_to = models.ForeignKey('Product', on_delete=models.CASCADE, db_index=True)
     rating_image = models.ImageField(upload_to='rating_product', blank=True, null=True)
-    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, db_index=True, blank=True, null=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, db_index=True)
     rating_comment = models.TextField(db_index=True)
 
     def __str__(self):
-        return f'Review by {self.reviewd_by.get_full_name()} for {self.review_to.productName}'
+        return f'Review for {self.review_to.productName}'
 
     
 
