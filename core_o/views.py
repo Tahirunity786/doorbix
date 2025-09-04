@@ -204,8 +204,6 @@ class OrderTrackView(generics.GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         order_number = request.query_params.get("order_number")
-        print("Here is order number: ",order_number)
-
         if not order_number:
             return Response({"detail": "Order number is required."},
                             status=status.HTTP_400_BAD_REQUEST)
