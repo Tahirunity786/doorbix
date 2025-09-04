@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db import transaction
-from .models import Order, OrderItem, OrderAddress
+from django.utils import timezone
+from .models import CouriorInfo, Order, OrderItem, OrderAddress
 from core_p.models import Product
 
 
@@ -119,3 +120,29 @@ class OrderSerializer(serializers.ModelSerializer):
         order.save()
 
         return order
+
+
+
+class CouriorInfoSerializer(serializers.ModelSerializer):
+    """Serialize courier details linked with an order."""
+
+    class Meta:
+        model = CouriorInfo
+        fields = ["coriour_name", "tracking_id"]
+
+
+class OrderTrackSerializer(serializers.ModelSerializer):
+    """Serializer to expose only tracking-related fields for frontend order tracking."""
+
+    courier = CouriorInfoSerializer(source="courior", many=True, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            "order_number",      # Friendly order ID (DBX-20250904-0001)
+            "status",            # Enum value ("PEN", "PRO", "SHI", "CAN")
+            "status_display",    # Human-readable ("Pending", "Processing", "Shipped", etc.)
+            "courier",           # Nested courier info
+            "updated_at",        # Last update timestamp
+        ]

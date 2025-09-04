@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
+from rest_framework import generics
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework import status
@@ -6,13 +7,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db.models import Prefetch
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
-from .models import Order, OrderItem, OrderAddress
-from .serializers import OrderSerializer
-from django.core.mail import send_mail
+from .models import CouriorInfo, Order, OrderItem, OrderAddress
+from .serializers import OrderSerializer, OrderTrackSerializer
 from django.conf import settings
 from django.utils import timezone
 from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
+from rest_framework.throttling import AnonRateThrottle
 
 class OrderPlacer(APIView):
     permission_classes = [AllowAny]
@@ -190,4 +191,30 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
             "addresses": [str(addr) for addr in order.addresses.all()],
         }
         return Response(data, status=status.HTTP_200_OK)
-    
+
+
+class OrderTrackView(generics.GenericAPIView):
+    """
+    API endpoint to check order tracking info by `order_number`.
+
+    Example: GET /api/orders/track/?order_number=DBX-20250904-0001
+    """
+
+    serializer_class = OrderTrackSerializer
+
+    def get(self, request, *args, **kwargs):
+        order_number = request.query_params.get("order_number")
+        print("Here is order number: ",order_number)
+
+        if not order_number:
+            return Response({"detail": "Order number is required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            order = Order.objects.prefetch_related("courior").get(order_number=order_number)
+        except Order.DoesNotExist:
+            return Response({"detail": "Order not found."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)

@@ -11,13 +11,20 @@ from django.core.validators import RegexValidator
 #     message="Use ISO 3166-1 alpha-2 uppercase country code."
 # )
 
+class CouriorInfo(models.Model):
+    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, unique=True, db_index=True)
+    order = models.ForeignKey("Order", on_delete=models.CASCADE, related_name="courior", db_index=True)
+    coriour_name = models.CharField(max_length=100, db_index=True, default="")
+    tracking_id = models.CharField(max_length=200, db_index=True, default="")
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    
+
 class Order(models.Model):
     class Status(models.TextChoices):
         PENDING     = "PEN", "Pending"
         PROCESSING  = "PRO", "Processing"
-        COMPLETED   = "COM", "Completed"
+        COMPLETED   = "SHI", "SHIPPED"
         CANCELED    = "CAN", "Canceled"
-        REFUNDED    = "REF", "Refunded"
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, unique=True, db_index=True)
 
