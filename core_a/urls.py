@@ -1,9 +1,10 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
-from core_a.views import UserViewSet
+from core_a.views import UserViewSet, SubscriptionViewSet
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')
+router.register(r'subscribe', SubscriptionViewSet, basename='sub')
 
 
 urlpatterns = [

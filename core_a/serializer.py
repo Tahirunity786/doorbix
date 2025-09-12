@@ -28,3 +28,18 @@ class UserSerializer(serializers.ModelSerializer):
             validated_data['username'] = username
 
         return super().create(validated_data)
+
+class SubscriptionSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        if not value:
+            raise serializers.ValidationError("Email is required.")
+        return value
+
+    def create(self, validated_data):
+        from .models import Subscription
+        subscription, created = Subscription.objects.get_or_create(email=validated_data['email'])
+        if not created:
+            raise serializers.ValidationError("This email is already subscribed.")
+        return subscription

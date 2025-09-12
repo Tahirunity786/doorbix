@@ -13,4 +13,20 @@ class CustomUser(AbstractUser):
         """
         super().set_password(raw_password)
 
-    
+class Subscription(models.Model):
+    email = models.EmailField(unique=True)
+    subscribed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.email
+    class Meta:
+        ordering = ['-subscribed_at']
+        verbose_name = 'Subscription'
+        verbose_name_plural = 'Subscriptions'
+        indexes = [
+            models.Index(fields=['email']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['email'], name='unique_email_subscription')
+        ]
+        

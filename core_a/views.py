@@ -92,3 +92,26 @@ class UserViewSet(viewsets.ViewSet):
             },
             "tokens": tokens
         }, status=status.HTTP_200_OK)
+
+class SubscriptionViewSet(viewsets.ViewSet):
+    """
+    A ViewSet for managing email subscriptions.
+    Supports:
+      - create/subscribe (POST /subscribe/)
+    """
+
+    def create(self, request):
+        """
+        Subscribe a new email.
+        Validates the email and ensures it's not already registered as a user.
+        """
+        from .serializer import SubscriptionSerializer
+        serializer = SubscriptionSerializer(data=request.data)
+        if serializer.is_valid():
+            subscription = serializer.save()
+            return Response({
+                "email": subscription.email,
+                "subscribed_at": subscription.subscribed_at
+            }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)  
