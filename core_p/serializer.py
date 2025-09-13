@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
+    Coupon,
     Product,
     ProductReview,
     ProductVariant,
@@ -235,4 +236,15 @@ class ProductSerializer(serializers.ModelSerializer):
             return None
         return round(sum([r.rating for r in reviews]) / reviews.count(), 2)
 
+class CouponSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField()
 
+    def validate_email(self, value):
+        if not value:
+            raise serializers.ValidationError("Email is required.")
+        return value
+    def validate_code(self, value):
+        if not value:
+            raise serializers.ValidationError("Coupon is required.")
+        return value

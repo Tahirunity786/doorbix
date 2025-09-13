@@ -1,16 +1,21 @@
 from uuid import UUID
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
 from rest_framework import viewsets, status, generics, filters
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.encoding import iri_to_uri
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import F, Value, FloatField, Q, When, Case, IntegerField
 from django.db.models.expressions import RawSQL
+
+from core_a.models import Subscription
 from .filter import ProductFilter, normalize_query
 
-from .models import Product, ProductCategory, ProductCollection
-from .serializer import ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
+from .models import CouponUsage, Product, ProductCategory, ProductCollection, Coupon
+from .serializer import CouponSerializer, ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
 
 class ProductViewSet(viewsets.ViewSet):
     PRODUCT_TYPE_FILTERS = {
@@ -263,3 +268,75 @@ class SearchProduct(generics.ListAPIView):
 
         # cache.set(cache_key, gathered, timeout=120)
         return qs
+
+class CouponApplier(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = CouponSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "status": "error",
+                "message": "Oops! Something’s wrong with the email you entered.",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+
+        # Get or create subscription for guest users
+        subscription, _ = Subscription.objects.get_or_create(email=email)
+
+        try:
+            # Filter valid coupons
+            coupon = Coupon.objects.filter(
+                code__iexact=code,
+                active=True,
+                expires_at__gt=timezone.now()
+            ).first()  # get coupon or None
+
+            if not coupon:
+                return Response({
+                    "status": "warning",
+                    "message": "Hmm… Invalid Coupon 😅"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check usage
+            usage = CouponUsage.objects.filter(coupon=coupon, subscription=subscription).first()
+            usage_count = usage.usage_count if usage else 0
+
+            if coupon.usage_limit and usage_count >= coupon.usage_limit:
+                return Response({
+                    "status": "warning",
+                    "message": f"Oops! You have already used this coupon {coupon.usage_limit} times."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create or update usage
+            if usage:
+                usage.usage_count += 1
+                usage.save()
+            else:
+                CouponUsage.objects.create(coupon=coupon, subscription=subscription, usage_count=1)
+
+            # Success response
+            coupon_data = {
+                "id": str(coupon.id),
+                "code": coupon.code,
+                "discount_type": getattr(coupon, "discount_type", "percentage"),
+                "discount_value": float(getattr(coupon, "discount_value", coupon.discount_percentage)),
+                "usage_limit": coupon.usage_limit,
+                "expiry_date": coupon.expires_at,
+            }
+
+            return Response({
+                "status": "success",
+                "message": f"Yay! Your coupon '{coupon.code}' has been applied successfully. 🎉",
+                "data": coupon_data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status": "error",
+                "message": "Oops! Something went wrong while applying the coupon. Please try again later.",
+                "details": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
