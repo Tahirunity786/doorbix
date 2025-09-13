@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
@@ -47,42 +48,43 @@ class OrderAddressSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
-
 class OrderSerializer(serializers.ModelSerializer):
     """
-    Serializer for creating and retrieving orders.
-    Handles nested items and addresses.
+    Handles creation of orders with nested items & addresses.
+    - User is auto-assigned if authenticated
+    - Subtotal & totals are computed
+    - Coupon code is passed through (handled in view)
     """
     items = OrderItemSerializer(many=True, write_only=True)
     addresses = OrderAddressSerializer(many=True, write_only=True)
+    code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Order
         fields = [
             "id", "status", "user", "subtotal_amount", "total_amount",
-            "items", "addresses"
+            "items", "addresses", "code"
         ]
         read_only_fields = [
             "id", "status", "created_at", "updated_at",
-            "subtotal_amount", "total_amount", "user"  # user should be readonly
+            "subtotal_amount", "total_amount", "user"
         ]
 
     def create(self, validated_data):
         request = self.context.get("request")
-
-        # Extract nested data
         items_data = validated_data.pop("items", [])
         addresses_data = validated_data.pop("addresses", [])
+        code = validated_data.pop("code", None)  # passed to view later
 
-        # ✅ Assign user only if authenticated
+        # Assign user if logged in
         user = request.user if request and request.user.is_authenticated else None
 
-        # Create Order
+        # Create base order
         order = Order.objects.create(user=user, **validated_data)
 
-        subtotal = 0
+        subtotal = Decimal("0.00")
 
-        # Create Order Items
+        # Create order items
         for item_data in items_data:
             product_id = item_data.pop("product_id")
             quantity = item_data.get("quantity", 1)
@@ -90,9 +92,10 @@ class OrderSerializer(serializers.ModelSerializer):
             try:
                 product = Product.objects.get(id=product_id)
             except Product.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"items": f"Product with id {product_id} does not exist."}
-                )
+                raise serializers.ValidationError({"items": f"Product {product_id} does not exist."})
+
+            if product.productStock < quantity:
+                raise serializers.ValidationError({"items": "Insufficient stock. Please contact support."})
 
             order_item = OrderItem.objects.create(
                 order=order,
@@ -101,26 +104,25 @@ class OrderSerializer(serializers.ModelSerializer):
                 name=product.productName,
                 quantity=quantity,
                 unit_price=product.productPrice,
-                total_price=product.productPrice * quantity
+                total_price=product.productPrice * quantity,
             )
-            subtotal += order_item.total_price
-            if product.productStock < quantity:
-                raise serializers.ValidationError( {"items": f"Something went wrong, Please contact to our customer support."})
-            product.productStock = product.productStock - quantity
-            product.save()
-                
 
-        # Create Addresses
+            subtotal += order_item.total_price
+
+            # Update stock
+            product.productStock -= quantity
+            product.save(update_fields=["productStock"])
+
+        # Create order addresses
         for addr_data in addresses_data:
             OrderAddress.objects.create(order=order, **addr_data)
 
         # Update totals
         order.subtotal_amount = subtotal
-        order.total_amount = subtotal  # if tax/shipping, update here
-        order.save()
+        order.total_amount = subtotal  # updated later if discount/tax/shipping applies
+        order.save(update_fields=["subtotal_amount", "total_amount"])
 
         return order
-
 
 
 class CouriorInfoSerializer(serializers.ModelSerializer):

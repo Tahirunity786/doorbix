@@ -311,13 +311,6 @@ class CouponApplier(APIView):
                     "message": f"Oops! You have already used this coupon {coupon.usage_limit} times."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Create or update usage
-            if usage:
-                usage.usage_count += 1
-                usage.save()
-            else:
-                CouponUsage.objects.create(coupon=coupon, subscription=subscription, usage_count=1)
-
             # Success response
             coupon_data = {
                 "id": str(coupon.id),

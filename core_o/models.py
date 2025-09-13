@@ -152,6 +152,8 @@ class OrderItem(models.Model):
     quantity   = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     total_price= models.DecimalField(max_digits=12, decimal_places=2)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
 
     class Meta:
         db_table = "order_items"

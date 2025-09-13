@@ -1,5 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
-from rest_framework import generics
+from rest_framework import generics, serializers
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework import status
@@ -7,6 +7,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db.models import Prefetch
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
+from django.db import transaction
+from core_a.models import Subscription
+from core_p.models import Coupon, CouponUsage
 from .models import CouriorInfo, Order, OrderItem, OrderAddress
 from .serializers import OrderSerializer, OrderTrackSerializer
 from django.conf import settings
@@ -16,108 +19,154 @@ from django.core.mail import EmailMultiAlternatives
 from rest_framework.throttling import AnonRateThrottle
 
 class OrderPlacer(APIView):
+    """
+    Handles order placement:
+    - Validates serializer
+    - Applies coupon discount if provided
+    - Distributes discount across items
+    - Tracks coupon usage
+    - Sends confirmation email
+    """
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = OrderSerializer(data=request.data, context={"request": request})
-        
-        if serializer.is_valid():
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # Save base order & items
             order = serializer.save()
+            code = serializer.validated_data.get("code")
 
             # =============================
-            #  APPLY DISCOUNT FOR AUTH USERS
+            # APPLY DISCOUNT (from coupon)
             # =============================
-            if order.user and order.user.is_authenticated:
-                discount_percent = getattr(settings, "SUBSCRIBED_USER_DISCOUNT", 0)
-            
-                try:
-                    discount_percent = int(discount_percent)  # ensure integer
-                except ValueError:
-                    discount_percent = 0
-            
-                # If discount percent is configured OR you want to apply 0.97 fixed discount
-                if discount_percent > 0 or discount_percent == 97:
-                    if discount_percent == 97:  
-                        # Apply fixed 0.97 (97% discount)
-                        discount_value = (order.subtotal_amount * Decimal("0.97"))
-                    else:
-                        # Apply normal percentage discount
-                        discount_value = (order.subtotal_amount * Decimal(discount_percent)) / Decimal(100)
-            
-                    # Round to nearest integer (87.22 -> 87, 86.69 -> 87)
-                    discount_value = discount_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-            
-                    order.discount_amount = discount_value
-                    order.total_amount = (
-                        order.subtotal_amount + order.shipping_amount + order.tax_amount
-                    ) - discount_value
-            
-                    order.save(update_fields=["discount_amount", "total_amount"])
+            if code:
+                self._apply_coupon_discount(order, code)
+
             # =============================
-            #   EMAIL SENDING
+            # EMAIL SENDING
             # =============================
-            recipient_emails = list(
-                set(
-                    addr.email.strip()
-                    for addr in order.addresses.all()
-                    if addr.email
+            self._send_confirmation_email(order)
+
+        return Response(
+            {
+                "message": "Order placed successfully!",
+                "order_id": order.id,
+                "emails_sent_to": [addr.email for addr in order.addresses.all() if addr.email],
+                "guest_order": order.user is None,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    # -----------------------------
+    # Helpers
+    # -----------------------------
+
+    def _apply_coupon_discount(self, order, code: str):
+        """Apply discount from coupon and update usage tracking."""
+        # Get primary email (for guest subscriptions)
+        email = order.addresses.first().email if order.addresses.exists() else None
+        subscription, _ = Subscription.objects.get_or_create(email=email) if email else (None, None)
+
+        try:
+            coupon = Coupon.objects.get(code=code, active=True)
+        except Coupon.DoesNotExist:
+            return  # Invalid coupon → ignore silently
+
+        if order.subtotal_amount <= 0:
+            return
+
+        # Compute discount value
+        discount_percent = coupon.discount_percentage
+        discount_value = (
+            order.subtotal_amount * Decimal(discount_percent) / Decimal(100)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # Update order totals
+        order.discount_amount = discount_value
+        order.total_amount = (
+            order.subtotal_amount + order.shipping_amount + order.tax_amount
+        ) - discount_value
+        order.save(update_fields=["discount_amount", "total_amount"])
+
+        # Spread discount proportionally across items
+        for item in order.items.all():
+            proportion = item.total_price / order.subtotal_amount
+            line_discount = (discount_value * proportion).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            item.discount_amount = line_discount
+            item.total_price = item.total_price - line_discount
+            item.save(update_fields=["discount_amount", "total_price"])
+
+        # Track usage (if subscription exists)
+        if subscription:
+            usage = CouponUsage.objects.filter(coupon=coupon, subscription=subscription).first()
+            usage_count = usage.usage_count if usage else 0
+
+            if coupon.usage_limit and usage_count >= coupon.usage_limit:
+                raise serializers.ValidationError(
+                    {"code": f"Oops! You have already used this coupon {coupon.usage_limit} times."}
                 )
-            )
 
-            if recipient_emails:
-                try:
-                    context = {
-                        "user": {"name": order.user.first_name if order.user else "Guest"},
-                        "order": {
-                            "order_number": order.order_number,
-                            "id": order.id,
-                            "subtotal": order.subtotal_amount,
-                            "shipping": order.shipping_amount,
-                            "discount": order.discount_amount,
-                            "total": order.total_amount,
-                            "currency": order.currency,
-                            "items": [
-                                {
-                                    "name": item.name,
-                                    "quantity": item.quantity,
-                                    "price": item.total_price,
-                                }
-                                for item in order.items.all()
-                            ],
-                            "tracking_url": f"https://doorbix.com/orders/{order.id}/track/",
-                        },
-                        "current_year": timezone.now().year,
-                    }
-
-                    html_content = render_to_string("email/order.html", context)
-                    text_content = f"Thank you for your order {order.order_number}. Total: {order.total_amount} {order.currency}"
-
-                    email = EmailMultiAlternatives(
-                        subject=f"Your Order Confirmation: {order.order_number}",
-                        body=text_content,
-                        from_email=settings.DEFAULT_FROM_EMAIL,
-                        to=recipient_emails,
-                    )
-                    email.attach_alternative(html_content, "text/html")
-                    email.send(fail_silently=False)
-
-                except Exception as e:
-                    print(f"⚠ Email sending failed for order {order.id}: {e}")
+            if usage:
+                usage.usage_count += 1
+                usage.save(update_fields=["usage_count"])
             else:
-                print(f"Order {order.order_number} placed successfully (⚠ no email found)")
+                CouponUsage.objects.create(coupon=coupon, subscription=subscription, usage_count=1)
 
-            return Response(
-                {
-                    "message": "Order placed successfully!",
-                    "order_id": order.id,
-                    "emails_sent_to": recipient_emails,
-                    "guest_order": order.user is None,
+    def _send_confirmation_email(self, order):
+        """Send order confirmation email to all associated addresses."""
+        recipient_emails = list(
+            {addr.email.strip() for addr in order.addresses.all() if addr.email}
+        )
+        if not recipient_emails:
+            print(f"Order {order.order_number} placed (⚠ no email found)")
+            return
+
+        try:
+            context = {
+                "user": {"name": order.user.first_name if order.user else "Guest"},
+                "order": {
+                    "order_number": order.order_number,
+                    "id": order.id,
+                    "subtotal": order.subtotal_amount,
+                    "shipping": order.shipping_amount,
+                    "discount": order.discount_amount,
+                    "total": order.total_amount,
+                    "currency": order.currency,
+                    "items": [
+                        {
+                            "name": item.name,
+                            "quantity": item.quantity,
+                            "price": item.unit_price,
+                            "line_total": item.total_price,
+                            "discount": item.discount_amount,
+                        }
+                        for item in order.items.all()
+                    ],
+                    "tracking_url": f"https://doorbix.com/orders/{order.id}/track/",
                 },
-                status=status.HTTP_201_CREATED,
+                "current_year": timezone.now().year,
+            }
+
+            html_content = render_to_string("email/order.html", context)
+            text_content = f"Thank you for your order {order.order_number}. Total: {order.total_amount} {order.currency}"
+
+            email = EmailMultiAlternatives(
+                subject=f"Your Order Confirmation: {order.order_number}",
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=recipient_emails,
             )
+            email.attach_alternative(html_content, "text/html")
+            email.send(fail_silently=False)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        except Exception as e:
+            print(f"⚠ Email sending failed for order {order.id}: {e}")
 
 class OrderPlacerCompactor(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
