@@ -36,37 +36,62 @@ class OrderPlacer(APIView):
     def post(self, request):
         serializer = OrderSerializer(data=request.data, context={"request": request})
         if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "success": False,
+                    "code": "VALIDATION_ERROR",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # All DB mutations inside a transaction
-        with transaction.atomic():
-            # create base order and nested objects
-            order = serializer.save()
+        try:
+            with transaction.atomic():
+                order = serializer.save()
 
-            # try to apply coupon if provided
-            code = serializer.validated_data.get("code")
-            if code:
-                # Applying coupon requires authentication per your CASE 3 requirement:
-                if not request.user or not request.user.is_authenticated:
-                    # If unauthenticated, we do NOT apply coupon and return validation error
-                    raise serializers.ValidationError(
-                        {"code": "You must be authenticated to apply a coupon."}
-                    )
-                # apply coupon (raises ValidationError on invalid/limit)
-                self._apply_coupon_discount(order=order, code=code, request_user=request.user)
+                code = serializer.validated_data.get("code")
+                if code:
+                    if not request.user or not request.user.is_authenticated:
+                        return Response(
+                            {
+                                "success": False,
+                                "code": "AUTH_REQUIRED",
+                                "message": "You must be logged in to use a coupon."
+                            },
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+                    self._apply_coupon_discount(order=order, code=code, request_user=request.user)
 
-            # Send confirmation email (best-effort; failure doesn't rollback order)
-            self._send_confirmation_email(order)
+                self._send_confirmation_email(order)
 
-        return Response(
-            {
-                "message": "Order placed successfully!",
-                "order_id": order.id,
-                "emails_sent_to": [addr.email for addr in order.addresses.all() if addr.email],
-                "guest_order": order.user is None,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+            return Response(
+                {
+                    "success": True,
+                    "code": "ORDER_PLACED",
+                    "message": "Order placed successfully.",
+                    "order_id": order.id,
+                    "emails_sent_to": [addr.email for addr in order.addresses.all() if addr.email],
+                    "guest_order": order.user is None,
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        except serializers.ValidationError as e:
+            # These already have professional codes/messages
+            return Response(
+                {"success": False, **e.detail},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            # Catch-all for unexpected errors
+            return Response(
+                {
+                    "success": False,
+                    "code": "SERVER_ERROR",
+                    "message": "An unexpected error occurred. Please try again later."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     # -----------------------------
     # Helpers
@@ -156,7 +181,7 @@ class OrderPlacer(APIView):
             # refresh from DB to get integer value if needed elsewhere
             usage.refresh_from_db()
         else:
-            CouponUsage.objects.create(coupon=coupon, subscription_user=request_user, usage_count=1)
+            CouponUsage.objects.create(coupon=coupon, user=request_user, usage_count=1)
 
     def _send_confirmation_email(self, order: "Order"):
         """

@@ -47,7 +47,6 @@ class OrderAddressSerializer(serializers.ModelSerializer):
             "line1", "line2", "state", "country"
         ]
         read_only_fields = ["id"]
-
 class OrderSerializer(serializers.ModelSerializer):
     """
     Handles creation of orders with nested items & addresses.
@@ -74,7 +73,7 @@ class OrderSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         items_data = validated_data.pop("items", [])
         addresses_data = validated_data.pop("addresses", [])
-        code = validated_data.pop("code", None)  # passed to view later
+        validated_data.pop("code", None)  # handled in view
 
         # Assign user if logged in
         user = request.user if request and request.user.is_authenticated else None
@@ -84,7 +83,6 @@ class OrderSerializer(serializers.ModelSerializer):
 
         subtotal = Decimal("0.00")
 
-        # Create order items
         for item_data in items_data:
             product_id = item_data.pop("product_id")
             quantity = item_data.get("quantity", 1)
@@ -92,10 +90,16 @@ class OrderSerializer(serializers.ModelSerializer):
             try:
                 product = Product.objects.get(id=product_id)
             except Product.DoesNotExist:
-                raise serializers.ValidationError({"items": f"Product {product_id} does not exist."})
+                raise serializers.ValidationError({
+                    "code": "PRODUCT_NOT_FOUND",
+                    "message": f"Product with ID {product_id} does not exist."
+                })
 
             if product.productStock < quantity:
-                raise serializers.ValidationError({"items": "Insufficient stock. Please contact support."})
+                raise serializers.ValidationError({
+                    "code": "OUT_OF_STOCK",
+                    "message": f"Product '{product.productName}' is out of stock. Please contact support."
+                })
 
             order_item = OrderItem.objects.create(
                 order=order,
@@ -113,13 +117,11 @@ class OrderSerializer(serializers.ModelSerializer):
             product.productStock -= quantity
             product.save(update_fields=["productStock"])
 
-        # Create order addresses
         for addr_data in addresses_data:
             OrderAddress.objects.create(order=order, **addr_data)
 
-        # Update totals
         order.subtotal_amount = subtotal
-        order.total_amount = subtotal  # updated later if discount/tax/shipping applies
+        order.total_amount = subtotal
         order.save(update_fields=["subtotal_amount", "total_amount"])
 
         return order
