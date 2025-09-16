@@ -237,13 +237,8 @@ class ProductSerializer(serializers.ModelSerializer):
         return round(sum([r.rating for r in reviews]) / reviews.count(), 2)
 
 class CouponSerializer(serializers.Serializer):
-    email = serializers.EmailField()
     code = serializers.CharField()
 
-    def validate_email(self, value):
-        if not value:
-            raise serializers.ValidationError("Email is required.")
-        return value
     def validate_code(self, value):
         if not value:
             raise serializers.ValidationError("Coupon is required.")

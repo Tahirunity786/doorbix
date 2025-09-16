@@ -171,8 +171,7 @@ class OrderPlacer(APIView):
 
             # Update fields on item
             item.discount_amount = line_discount
-            item.total_price = (item.total_price - line_discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            item.save(update_fields=["discount_amount", "total_price"])
+            item.save(update_fields=["discount_amount"])
 
         # Track coupon usage (increment or create)
         if usage:
@@ -296,8 +295,11 @@ class OrderPlacerCompactor(viewsets.ModelViewSet):
             for item in order.items.all()
         ]
     
+        first_address = order.addresses.first()
         data = {
             "id": str(order.id),
+            "order_id": order.order_number,
+            "msg_info": True if (first_address and first_address.email) else False,
             "status": order.get_status_display(),
             "total_amount": float(order.total_amount),
             "discount_amount": order.discount_amount,

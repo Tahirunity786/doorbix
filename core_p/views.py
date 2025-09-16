@@ -283,11 +283,7 @@ class CouponApplier(APIView):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        email = serializer.validated_data['email']
         code = serializer.validated_data['code']
-
-        # Get or create subscription for guest users
-        user = User.objects.get(email=email)
 
         try:
             # Filter valid coupons
@@ -304,7 +300,7 @@ class CouponApplier(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
             # Check usage
-            usage = CouponUsage.objects.filter(coupon=coupon, user=user).first()
+            usage = CouponUsage.objects.filter(coupon=coupon, user=request.user).first()
             usage_count = usage.usage_count if usage else 0
 
             if coupon.usage_limit and usage_count >= coupon.usage_limit:
