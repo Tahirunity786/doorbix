@@ -15,40 +15,47 @@ from .serializers import OrderSerializer, OrderTrackSerializer
 from django.conf import settings
 from django.utils import timezone
 from django.template.loader import render_to_string
+from django.db.models import F
 from django.core.mail import EmailMultiAlternatives
 from rest_framework.throttling import AnonRateThrottle
+from django.contrib.auth import get_user_model
 
+User = get_user_model()
 class OrderPlacer(APIView):
     """
     Handles order placement:
-    - Validates serializer
-    - Applies coupon discount if provided
-    - Distributes discount across items
-    - Tracks coupon usage
-    - Sends confirmation email
+      - Validates serializer
+      - Creates order/items/addresses
+      - Optionally applies coupon (coupon application REQUIRES authenticated user)
+      - Distributes discount across items (rounded; residual adjustment)
+      - Tracks coupon usage (using CouponUsage.subscription_user)
+      - Sends confirmation email
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = OrderSerializer(data=request.data, context={"request": request})
-
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        # All DB mutations inside a transaction
         with transaction.atomic():
-            # Save base order & items
+            # create base order and nested objects
             order = serializer.save()
+
+            # try to apply coupon if provided
             code = serializer.validated_data.get("code")
-
-            # =============================
-            # APPLY DISCOUNT (from coupon)
-            # =============================
             if code:
-                self._apply_coupon_discount(order, code)
+                # Applying coupon requires authentication per your CASE 3 requirement:
+                if not request.user or not request.user.is_authenticated:
+                    # If unauthenticated, we do NOT apply coupon and return validation error
+                    raise serializers.ValidationError(
+                        {"code": "You must be authenticated to apply a coupon."}
+                    )
+                # apply coupon (raises ValidationError on invalid/limit)
+                self._apply_coupon_discount(order=order, code=code, request_user=request.user)
 
-            # =============================
-            # EMAIL SENDING
-            # =============================
+            # Send confirmation email (best-effort; failure doesn't rollback order)
             self._send_confirmation_email(order)
 
         return Response(
@@ -64,87 +71,121 @@ class OrderPlacer(APIView):
     # -----------------------------
     # Helpers
     # -----------------------------
+    def _apply_coupon_discount(self, order, code, request_user):
+        """
+        Apply discount and track coupon usage.
 
-    def _apply_coupon_discount(self, order, code: str):
-        """Apply discount from coupon and update usage tracking."""
-        # Get primary email (for guest subscriptions)
-        email = order.addresses.first().email if order.addresses.exists() else None
-        subscription, _ = Subscription.objects.get_or_create(email=email) if email else (None, None)
-
-        try:
-            coupon = Coupon.objects.get(code=code, active=True)
-        except Coupon.DoesNotExist:
-            return  # Invalid coupon → ignore silently
-
-        if order.subtotal_amount <= 0:
+        - Only called if request_user is authenticated (enforced by caller).
+        - Locks coupon row with select_for_update to avoid race conditions on usage limits.
+        - Distributes discount to items, corrects rounding residual on final item.
+        - Updates/creates CouponUsage using subscription_user field (matches your model).
+        """
+        if order.subtotal_amount <= Decimal("0.00"):
+            # Nothing to discount
             return
 
-        # Compute discount value
-        discount_percent = coupon.discount_percentage
+        # Lock coupon row to prevent concurrent over-usage
+        try:
+            coupon = Coupon.objects.select_for_update().get(code=code, active=True)
+        except Coupon.DoesNotExist:
+            raise serializers.ValidationError({"code": "Invalid coupon code."})
+
+        # Compute discount
+        discount_percent = coupon.discount_percentage or Decimal("0")
         discount_value = (
-            order.subtotal_amount * Decimal(discount_percent) / Decimal(100)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            (order.subtotal_amount * Decimal(discount_percent) / Decimal(100))
+            .quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+
+        if discount_value <= Decimal("0.00"):
+            # no effective discount
+            return
+
+        # Enforce usage limit (CouponUsage is unique per coupon & subscription_user)
+        usage = CouponUsage.objects.filter(coupon=coupon, user=request_user).first()
+        usage_count = usage.usage_count if usage else 0
+        if coupon.usage_limit and usage_count >= coupon.usage_limit:
+            raise serializers.ValidationError(
+                {"code": f"You have already used this coupon {coupon.usage_limit} times."}
+            )
 
         # Update order totals
         order.discount_amount = discount_value
-        order.total_amount = (
-            order.subtotal_amount + order.shipping_amount + order.tax_amount
-        ) - discount_value
+        # assume shipping & tax fields exist and default to 0 if not set
+        shipping = getattr(order, "shipping_amount", Decimal("0.00")) or Decimal("0.00")
+        tax = getattr(order, "tax_amount", Decimal("0.00")) or Decimal("0.00")
+        new_total = (order.subtotal_amount + shipping + tax) - discount_value
+        # prevent negative total
+        order.total_amount = new_total if new_total > Decimal("0.00") else Decimal("0.00")
         order.save(update_fields=["discount_amount", "total_amount"])
 
-        # Spread discount proportionally across items
-        for item in order.items.all():
-            proportion = item.total_price / order.subtotal_amount
-            line_discount = (discount_value * proportion).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
+        # Distribute discount across items proportionally and fix rounding residual
+        items = list(order.items.select_for_update().all())  # lock items while updating
+        if not items:
+            return
+
+        # compute distributed discounts and keep track of residual
+        distributed_sum = Decimal("0.00")
+        last_index = len(items) - 1
+
+        for idx, item in enumerate(items):
+            proportion = (
+                (item.total_price / order.subtotal_amount)
+                if order.subtotal_amount > Decimal("0.00")
+                else Decimal("0.00")
             )
+            # Round to cents
+            line_discount = (discount_value * proportion).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            # For the last item, assign residual so total matches discount_value exactly
+            if idx == last_index:
+                residual = discount_value - distributed_sum
+                line_discount = residual.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            distributed_sum += line_discount
+
+            # Update fields on item
             item.discount_amount = line_discount
-            item.total_price = item.total_price - line_discount
+            item.total_price = (item.total_price - line_discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             item.save(update_fields=["discount_amount", "total_price"])
 
-        # Track usage (if subscription exists)
-        if subscription:
-            usage = CouponUsage.objects.filter(coupon=coupon, subscription=subscription).first()
-            usage_count = usage.usage_count if usage else 0
+        # Track coupon usage (increment or create)
+        if usage:
+            usage.usage_count = F("usage_count") + 1
+            usage.save(update_fields=["usage_count"])
+            # refresh from DB to get integer value if needed elsewhere
+            usage.refresh_from_db()
+        else:
+            CouponUsage.objects.create(coupon=coupon, subscription_user=request_user, usage_count=1)
 
-            if coupon.usage_limit and usage_count >= coupon.usage_limit:
-                raise serializers.ValidationError(
-                    {"code": f"Oops! You have already used this coupon {coupon.usage_limit} times."}
-                )
-
-            if usage:
-                usage.usage_count += 1
-                usage.save(update_fields=["usage_count"])
-            else:
-                CouponUsage.objects.create(coupon=coupon, subscription=subscription, usage_count=1)
-
-    def _send_confirmation_email(self, order):
-        """Send order confirmation email to all associated addresses."""
-        recipient_emails = list(
-            {addr.email.strip() for addr in order.addresses.all() if addr.email}
-        )
+    def _send_confirmation_email(self, order: "Order"):
+        """
+        Send order confirmation email to associated addresses.
+        This is best-effort: failure to send email will not rollback the order.
+        """
+        recipient_emails = list({addr.email.strip() for addr in order.addresses.all() if addr.email})
         if not recipient_emails:
-            print(f"Order {order.order_number} placed (⚠ no email found)")
+            print(f"Order {getattr(order, 'order_number', order.id)} placed (⚠ no email found)")
             return
 
         try:
             context = {
                 "user": {"name": order.user.first_name if order.user else "Guest"},
                 "order": {
-                    "order_number": order.order_number,
+                    "order_number": getattr(order, "order_number", ""),
                     "id": order.id,
                     "subtotal": order.subtotal_amount,
-                    "shipping": order.shipping_amount,
-                    "discount": order.discount_amount,
+                    "shipping": getattr(order, "shipping_amount", Decimal("0.00")),
+                    "discount": getattr(order, "discount_amount", Decimal("0.00")),
                     "total": order.total_amount,
-                    "currency": order.currency,
+                    "currency": getattr(order, "currency", ""),
                     "items": [
                         {
                             "name": item.name,
                             "quantity": item.quantity,
                             "price": item.unit_price,
                             "line_total": item.total_price,
-                            "discount": item.discount_amount,
+                            "discount": getattr(item, "discount_amount", Decimal("0.00")),
                         }
                         for item in order.items.all()
                     ],
@@ -154,10 +195,10 @@ class OrderPlacer(APIView):
             }
 
             html_content = render_to_string("email/order.html", context)
-            text_content = f"Thank you for your order {order.order_number}. Total: {order.total_amount} {order.currency}"
+            text_content = f"Thank you for your order {getattr(order, 'order_number', order.id)}. Total: {order.total_amount} {getattr(order, 'currency', '')}"
 
             email = EmailMultiAlternatives(
-                subject=f"Your Order Confirmation: {order.order_number}",
+                subject=f"Your Order Confirmation: {getattr(order, 'order_number', order.id)}",
                 body=text_content,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=recipient_emails,
@@ -166,6 +207,7 @@ class OrderPlacer(APIView):
             email.send(fail_silently=False)
 
         except Exception as e:
+            # We avoid raising here because sending email should not block order creation.
             print(f"⚠ Email sending failed for order {order.id}: {e}")
 
 class OrderPlacerCompactor(viewsets.ModelViewSet):

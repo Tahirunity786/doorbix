@@ -298,14 +298,19 @@ class Coupon(models.Model):
 
 class CouponUsage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     coupon = models.ForeignKey(Coupon, on_delete=models.CASCADE)
-    subscription = models.ForeignKey('core_a.Subscription', on_delete=models.CASCADE, null=True, blank=True)
     used_at = models.DateTimeField(auto_now_add=True)
     usage_count = models.IntegerField(default=1)
     class Meta:
-        unique_together = ('coupon', 'subscription')
+        constraints = [
+            models.UniqueConstraint(
+                fields=['coupon', 'user'],
+                name='unique_coupon_subscription_user'
+            )
+        ]
         indexes = [
-            models.Index(fields=['coupon', 'subscription']),
+            models.Index(fields=['coupon', 'user']),
         ]
     def clean(self):
         if self.usage_count < 1:

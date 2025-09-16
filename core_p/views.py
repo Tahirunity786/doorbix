@@ -1,7 +1,7 @@
 from uuid import UUID
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import viewsets, status, generics, filters
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -11,11 +11,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import F, Value, FloatField, Q, When, Case, IntegerField
 from django.db.models.expressions import RawSQL
 
-from core_a.models import Subscription
+from django.contrib.auth import get_user_model
 from .filter import ProductFilter, normalize_query
 
 from .models import CouponUsage, Product, ProductCategory, ProductCollection, Coupon
 from .serializer import CouponSerializer, ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
+
+User = get_user_model()
 
 class ProductViewSet(viewsets.ViewSet):
     PRODUCT_TYPE_FILTERS = {
@@ -270,7 +272,7 @@ class SearchProduct(generics.ListAPIView):
         return qs
 
 class CouponApplier(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         serializer = CouponSerializer(data=request.data)
@@ -285,7 +287,7 @@ class CouponApplier(APIView):
         code = serializer.validated_data['code']
 
         # Get or create subscription for guest users
-        subscription, _ = Subscription.objects.get_or_create(email=email)
+        user = User.objects.get(email=email)
 
         try:
             # Filter valid coupons
@@ -302,7 +304,7 @@ class CouponApplier(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
             # Check usage
-            usage = CouponUsage.objects.filter(coupon=coupon, subscription=subscription).first()
+            usage = CouponUsage.objects.filter(coupon=coupon, user=user).first()
             usage_count = usage.usage_count if usage else 0
 
             if coupon.usage_limit and usage_count >= coupon.usage_limit:
