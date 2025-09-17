@@ -166,7 +166,7 @@ class Product(models.Model):
     productCreatedAt = models.DateTimeField(auto_now_add=True)
     productUpdatedAt = models.DateTimeField(auto_now=True)
     productSeo = models.OneToOneField('ProductMeta', on_delete=models.CASCADE, related_name='products', null=True, blank=True)
-
+    
     def __str__(self):
         return self.productName
     
