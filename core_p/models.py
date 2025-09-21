@@ -32,16 +32,22 @@ class ProductMeta(models.Model):
         verbose_name = 'Product Meta'
         verbose_name_plural = 'Product Metas'
 
+class VariantValue(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    valueName = models.CharField(max_length=100)
+    valueImage = models.ImageField(upload_to='variant_value_images/', null=True, blank=True)
 
+    def __str__(self):
+        return self.valueName
 
 class ProductVariant(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    variantImage = models.ImageField(upload_to='variant_images/')
     variantName = models.CharField(max_length=255)
     variantPrice = models.DecimalField(max_digits=10, decimal_places=2)
     variantSKU = models.CharField(max_length=100, unique=True)
     variantStock = models.PositiveIntegerField(default=0)
-    variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True, editable=False)
+    variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    variantValue = models.ManyToManyField(VariantValue, related_name='variants', blank=True)
     variantIsActive = models.BooleanField(default=True)
     variantCreatedAt = models.DateTimeField(auto_now_add=True)
     variantUpdatedAt = models.DateTimeField(auto_now=True)
