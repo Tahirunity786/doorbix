@@ -32,6 +32,7 @@ class ProductMeta(models.Model):
         verbose_name = 'Product Meta'
         verbose_name_plural = 'Product Metas'
 
+
 class VariantValue(models.Model):
     """
     Represents a specific value of a product variant.
@@ -39,6 +40,7 @@ class VariantValue(models.Model):
         - For variantType "Size", values might be "Small", "Medium", "Large".
         - For variantType "Color", values might be "Red", "Blue", "Green".
     """
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -52,7 +54,7 @@ class VariantValue(models.Model):
     )
     valueName = models.CharField(
         max_length=100,
-        db_index=True,  # Faster lookups
+        db_index=True,
         help_text="Display name of the variant value (e.g., 'Red', 'XL')."
     )
     valuePrice = models.DecimalField(
@@ -79,12 +81,50 @@ class VariantValue(models.Model):
         help_text="Optional unique barcode for scanning / inventory systems."
     )
 
+    # Intelligent extra fields (type-specific)
+    colorCode = models.CharField(
+        max_length=7,
+        null=True,
+        blank=True,
+        help_text="Hexadecimal color code (e.g., #FF0000). Required if variantType = 'color'."
+    )
+    numericValue = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Optional numeric mapping (e.g., size in cm, weight in grams)."
+    )
+    unit = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Unit for numericValue (e.g., 'cm', 'kg', 'ml')."
+    )
+
     class Meta:
         verbose_name = "Variant Value"
         verbose_name_plural = "Variant Values"
         ordering = ["valueName"]
 
+    def clean(self):
+        """
+        Ensure that intelligent fields are used correctly:
+        - colorCode must be provided if parent variantType = 'color'
+        - numericValue/unit must be provided if parent is numeric (size, weight, etc.)
+        """
+        parent_variants = self.variants.all()  # reverse M2M to ProductVariant
+        for parent in parent_variants:
+            if parent.variantType == "color" and not self.colorCode:
+                raise ValidationError("colorCode is required for color variant values.")
+            if parent.variantType in ["size", "weight", "length", "width", "height", "volume", "capacity"] and not self.numericValue:
+                raise ValidationError(f"numericValue is required for {parent.variantType} variant values.")
+
     def __str__(self):
+        if self.colorCode:
+            return f"{self.valueName} ({self.colorCode})"
+        elif self.numericValue:
+            return f"{self.valueName} ({self.numericValue}{self.unit or ''})"
         return f"{self.valueName} (SKU: {self.valueSKU})"
 
 
@@ -145,7 +185,6 @@ class ProductVariant(models.Model):
         help_text="Timestamp when this variant was last updated."
     )
 
-    # Self-referencing relationship for hierarchical variants
     parentVariant = models.ForeignKey(
         'self',
         null=True,
@@ -161,8 +200,9 @@ class ProductVariant(models.Model):
         ordering = ["variantType"]
 
     def __str__(self):
-        return f"{self.get_variantType_display()}"  # Human-readable label
+        return f"{self.get_variantType_display()}"
     
+
 class ProductReview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reviewd_by = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True, null=True, blank=True)
