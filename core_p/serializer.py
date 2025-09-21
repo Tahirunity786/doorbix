@@ -90,11 +90,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         model = ProductVariant
         fields = [
             'id',
-            'variantName',
-            'variantPrice',
-            'variantSKU',
-            'variantStock',
-            'variantBarcode',
+            'variantType',
             'variantIsActive',
             'variantCreatedAt',
             'variantUpdatedAt',

@@ -33,36 +33,135 @@ class ProductMeta(models.Model):
         verbose_name_plural = 'Product Metas'
 
 class VariantValue(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    valueName = models.CharField(max_length=100)
-    valueImage = models.ImageField(upload_to='variant_value_images/', null=True, blank=True)
+    """
+    Represents a specific value of a product variant.
+    Example:
+        - For variantType "Size", values might be "Small", "Medium", "Large".
+        - For variantType "Color", values might be "Red", "Blue", "Green".
+    """
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    valueImage = models.ImageField(
+        upload_to='variant_value_images/',
+        null=True,
+        blank=True,
+        help_text="Optional image representing the variant value (e.g., color swatch)."
+    )
+    valueName = models.CharField(
+        max_length=100,
+        db_index=True,  # Faster lookups
+        help_text="Display name of the variant value (e.g., 'Red', 'XL')."
+    )
+    valuePrice = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text="Additional price adjustment for this variant value (if any)."
+    )
+    valueSKU = models.CharField(
+        max_length=100,
+        default="",
+        unique=True,
+        help_text="Unique Stock Keeping Unit identifier for this variant value."
+    )
+    valueStock = models.PositiveIntegerField(
+        default=0,
+        help_text="Available stock quantity for this specific variant value."
+    )
+    valueBarcode = models.CharField(
+        max_length=100,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Optional unique barcode for scanning / inventory systems."
+    )
+
+    class Meta:
+        verbose_name = "Variant Value"
+        verbose_name_plural = "Variant Values"
+        ordering = ["valueName"]
 
     def __str__(self):
-        return self.valueName
+        return f"{self.valueName} (SKU: {self.valueSKU})"
+
 
 class ProductVariant(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    variantName = models.CharField(max_length=255)
-    variantPrice = models.DecimalField(max_digits=10, decimal_places=2)
-    variantSKU = models.CharField(max_length=100, unique=True)
-    variantStock = models.PositiveIntegerField(default=0)
-    variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True)
-    variantValue = models.ManyToManyField(VariantValue, related_name='variants', blank=True)
-    variantIsActive = models.BooleanField(default=True)
-    variantCreatedAt = models.DateTimeField(auto_now_add=True)
-    variantUpdatedAt = models.DateTimeField(auto_now=True)
+    """
+    Represents a variant type (e.g., Size, Color) for a product.
+    A product can have multiple variants (e.g., Size + Color).
+    Each variant can have multiple values (e.g., Size -> S, M, L).
+    """
+    VARIANT_CHOICES = [
+        ('size', 'Size'),
+        ('color', 'Color'),
+        ('material', 'Material'),
+        ('style', 'Style'),
+        ('pattern', 'Pattern'),
+        ('length', 'Length'),
+        ('width', 'Width'),
+        ('height', 'Height'),
+        ('weight', 'Weight'),
+        ('volume', 'Volume'),
+        ('capacity', 'Capacity'),
+        ('flavor', 'Flavor'),
+        ('scent', 'Scent'),
+        ('brand', 'Brand'),
+        ('model', 'Model'),
+        ('edition', 'Edition'),
+        ('other', 'Other'),
+    ]
 
-    # Self-referencing relationship
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    variantType = models.CharField(
+        max_length=255,
+        choices=VARIANT_CHOICES,
+        default='other',
+        db_index=True,
+        help_text="Defines the type of variant (e.g., Size, Color)."
+    )
+    variantValue = models.ManyToManyField(
+        VariantValue,
+        related_name='variants',
+        blank=True,
+        help_text="List of possible values for this variant (e.g., 'Red', 'Blue')."
+    )
+    variantIsActive = models.BooleanField(
+        default=True,
+        help_text="Indicates whether this variant is currently active."
+    )
+    variantCreatedAt = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when this variant was created."
+    )
+    variantUpdatedAt = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when this variant was last updated."
+    )
+
+    # Self-referencing relationship for hierarchical variants
     parentVariant = models.ForeignKey(
         'self',
         null=True,
         blank=True,
         related_name='childVariants',
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        help_text="Parent variant (if this is a sub-variant)."
     )
 
+    class Meta:
+        verbose_name = "Product Variant"
+        verbose_name_plural = "Product Variants"
+        ordering = ["variantType"]
+
     def __str__(self):
-        return self.variantName
+        return f"{self.get_variantType_display()}"  # Human-readable label
     
 class ProductReview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
