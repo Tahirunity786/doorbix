@@ -39,7 +39,7 @@ class ProductVariant(models.Model):
     variantImage = models.ImageField(upload_to='variant_images/')
     variantName = models.CharField(max_length=255)
     variantPrice = models.DecimalField(max_digits=10, decimal_places=2)
-    variantSKU = models.CharField(max_length=100, unique=True, editable=False)
+    variantSKU = models.CharField(max_length=100, unique=True)
     variantStock = models.PositiveIntegerField(default=0)
     variantBarcode = models.CharField(max_length=100, unique=True, null=True, blank=True, editable=False)
     variantIsActive = models.BooleanField(default=True)
