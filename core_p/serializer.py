@@ -9,7 +9,8 @@ from .models import (
     ProductCategory,
     ProductCollection,
     ProductShipping,
-    PCTags
+    PCTags,
+    VariantValue
 )
 
 User = get_user_model()
@@ -81,10 +82,70 @@ class ProductReviewSerializer(serializers.ModelSerializer):
             **validated_data
         )
 
-# ----------- Recursive Variant Serializer -----------
+# ----------- Untility Variant Serializer -----------
+class VariantValueSerializer(serializers.ModelSerializer):
+    """
+    Serializer for VariantValue.
+    Dynamically adjusts fields based on parent variant type.
+    """
+    class Meta:
+        model = VariantValue
+        fields = [
+            'id',
+            'valueImage',
+            'valueName',
+            'valuePrice',
+            'valueSKU',
+            'colorCode',
+            'numericValue',
+            'unit',
+        ]
+
+    def to_representation(self, instance):
+        """
+        Customize output depending on the variantType of the parent.
+        """
+        data = super().to_representation(instance)
+
+        parent_variant = self.context.get("parent_variant")
+
+        if parent_variant:
+            variant_type = parent_variant.variantType.lower()
+
+            # 🎨 Color-specific output
+            if variant_type == "color":
+                return {
+                    "id": data["id"],
+                    "name": data["valueName"],
+                    "code": data["colorCode"],  # HEX code
+                    "image": data["valueImage"],
+                }
+
+            # 📏 Size-specific output
+            if variant_type == "size":
+                return {
+                    "id": data["id"],
+                    "name": data["valueName"],
+                    "numeric": data["numericValue"],
+                    "unit": data["unit"],
+                }
+
+        # Default (for other types)
+        return {
+            "id": data["id"],
+            "name": data["valueName"],
+            "price": data["valuePrice"],
+            "sku": data["valueSKU"],
+            "image": data["valueImage"],
+        }
+
+
 class ProductVariantSerializer(serializers.ModelSerializer):
-    # Recursively serialize child variants (multi-level nesting)
+    """
+    Recursive ProductVariant serializer with smart variant values.
+    """
     childVariants = serializers.SerializerMethodField()
+    variantValue = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariant
@@ -94,14 +155,34 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             'variantIsActive',
             'variantCreatedAt',
             'variantUpdatedAt',
-            'childVariants'
+            'variantValue',
+            'childVariants',
         ]
 
-    def get_childVariants(self, obj):
-        # Recursive serialization of child variants
-        children = obj.childVariants.all()
-        return ProductVariantSerializer(children, many=True).data
+    def get_variantValue(self, obj):
+        serializer = VariantValueSerializer(
+            obj.variantValue.all(),
+            many=True,
+            context={"parent_variant": obj}  # Pass parent for smart logic
+        )
+        return serializer.data
 
+    def get_childVariants(self, obj):
+        """
+        Recursively fetch child variants.
+        """
+        depth = self.context.get("depth", 1)
+        current_level = self.context.get("level", 0)
+
+        if current_level >= depth:
+            return []
+
+        serializer = ProductVariantSerializer(
+            obj.childVariants.all(),
+            many=True,
+            context={**self.context, "level": current_level + 1}
+        )
+        return serializer.data
 
 # ----------- Product Category Serializer -----------
 class ProductCategorySerializer(serializers.ModelSerializer):
