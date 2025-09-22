@@ -119,6 +119,8 @@ class VariantValueSerializer(serializers.ModelSerializer):
                     "name": data["valueName"],
                     "code": data["colorCode"],  # HEX code
                     "image": data["valueImage"],
+                    "price": data["valuePrice"],
+                    "sku": data["valueSKU"],
                 }
 
             # 📏 Size-specific output

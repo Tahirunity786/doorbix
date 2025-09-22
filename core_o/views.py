@@ -8,9 +8,8 @@ from rest_framework.views import APIView
 from django.db.models import Prefetch
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
 from django.db import transaction
-from core_a.models import Subscription
 from core_p.models import Coupon, CouponUsage
-from .models import CouriorInfo, Order, OrderItem, OrderAddress
+from .models import Order, OrderItem, OrderAddress
 from .serializers import OrderSerializer, OrderTrackSerializer
 from django.conf import settings
 from django.utils import timezone
@@ -84,6 +83,7 @@ class OrderPlacer(APIView):
             )
         except Exception as e:
             # Catch-all for unexpected errors
+            print(e)
             return Response(
                 {
                     "success": False,

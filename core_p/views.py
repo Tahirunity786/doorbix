@@ -81,54 +81,104 @@ class ProductViewSet(viewsets.ViewSet):
         Allows returning full or mini data via ?view=mini|full
         """
         identifier = iri_to_uri(pk)
-        view_type = request.query_params.get("view", "full")  # default is full
-    
-        # Cache key depends on identifier + view type
-        cache_key = f"products:detail:{identifier}:{view_type}"
+        view_type = request.query_params.get("view", "full").lower().strip()
+        vid = request.query_params.get("variant")
+
+        # Build cache key safely
+        cache_key = self.make_cache_key(identifier, view_type, vid)
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
-    
-        # Try to detect if pk is a UUID
+
+        # Detect UUID vs slug
         try:
             uuid_obj = UUID(str(identifier))
             filter_kwargs = {"id": uuid_obj}
         except (ValueError, TypeError):
             filter_kwargs = {"productSlug": identifier}
-    
-        # Fetch product
+
+        # Fetch product safely
         product = get_object_or_404(Product, **filter_kwargs)
-    
-        # Choose serializer depending on view type
+
+        # Mini view with variant
+        if view_type == "mini" and vid:
+            variant_value = getattr(product.productVariant, "variantValue", None)
+            if variant_value:
+                variant_value = variant_value.filter(id=vid).first()
+
+            if variant_value:
+                data = {
+                    "id": str(product.id),
+                    "slug": product.productSlug,
+                    "name": product.productName,
+                    "price": float(variant_value.valuePrice or product.productPrice),
+                    "image": (
+                        request.build_absolute_uri(variant_value.valueImage.url)
+                        if getattr(variant_value, "valueImage", None)
+                        else (
+                            request.build_absolute_uri(product.productImages.first().image.url)
+                            if product.productImages.exists() and product.productImages.first().image
+                            else None
+                        )
+                    ),
+                    "qty": 1,
+                    "variant": {
+                        "id": str(variant_value.id),
+                        "name": variant_value.valueName,
+                        "code": variant_value.colorCode,
+                        "sku": variant_value.valueSKU,
+                        "price": float(variant_value.valuePrice or 0),
+                        "image": (
+                            request.build_absolute_uri(variant_value.valueImage.url)
+                            if getattr(variant_value, "valueImage", None)
+                            else None
+                        ),
+                    }
+                }
+                cache.set(cache_key, data, timeout=300)
+                return Response(data, status=status.HTTP_200_OK)
+
+        # Fallback serializers
         if view_type == "mini":
             data = {
-                "id": str(product.id),   # UUID string
+                "id": str(product.id),
                 "slug": product.productSlug,
                 "name": product.productName,
-                "price": product.productPrice,
+                "price": float(product.productPrice),
                 "image": (
                     request.build_absolute_uri(product.productImages.first().image.url)
                     if product.productImages.exists() and product.productImages.first().image
                     else None
                 ),
-                "qty": 1,  # default quantity for cart/cart-like usage
+                "qty": 1,
             }
         else:
-            data = ProductSerializer(product).data  # serializer.data
-    
-        # Cache data for 5 minutes
+            data = ProductSerializer(product).data
+
         cache.set(cache_key, data, timeout=300)
-    
         return Response(data, status=status.HTTP_200_OK)
 
+    @staticmethod
+    def make_cache_key(identifier: str, view_type: str, vid: str | None = None) -> str:
+        """
+        Generate a consistent cache key for product details.
+        Example: products:detail:id=123:view=mini:variant=456
+        """
+        parts = [
+            "products:detail",
+            f"id={identifier}",
+            f"view={view_type}"
+        ]
+        if vid:
+            parts.append(f"variant={vid}")
+        return ":".join(parts)
 
-
-    def _parse_int(self, value, field_name):
+    @staticmethod
+    def _parse_int(value, field_name):
         try:
             return int(value)
-        except ValueError:
+        except (ValueError, TypeError):
             return None
-
 
 
 class CollectionViewset(viewsets.ViewSet):
