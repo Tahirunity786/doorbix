@@ -213,7 +213,7 @@ class OrderPlacer(APIView):
                         }
                         for item in order.items.all()
                     ],
-                    "tracking_url": f"https://doorbix.com/track-order?o={order.id}",
+                    "tracking_url": f"https://doorbix.com/track-order?o={order.order_number}",
                 },
                 "current_year": timezone.now().year,
             }
