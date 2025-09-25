@@ -16,142 +16,153 @@ from .filter import ProductFilter, normalize_query
 
 from .models import CouponUsage, Product, ProductCategory, ProductCollection, Coupon
 from .serializer import CouponSerializer, ProductCategorySerializer, ProductSerializer, MiniProductSerializer, ProductCollectionSerializer, MiniCollectionSerializer
+from rest_framework.pagination import PageNumberPagination
+
 
 User = get_user_model()
 
+
+
+class SmallPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
 class ProductViewSet(viewsets.ViewSet):
     PRODUCT_TYPE_FILTERS = {
-        'bestSelling': {'productIsBestSelling': True},
-        'featuredProducts': {'productIsFeatured': True},
-        'onSaleProducts': {'productIsOnSale': True},
-        'subscriptionProduct': {'productIsForSubscription': True},
-        'discountProduct': {'productIsDiscounted': True},
+        "bestSelling": {"productIsBestSelling": True},
+        "featuredProducts": {"productIsFeatured": True},
+        "onSaleProducts": {"productIsOnSale": True},
+        "subscriptionProduct": {"productIsForSubscription": True},
+        "discountProduct": {"productIsOnSale": True},  # same as onSaleProducts
     }
 
     def list(self, request):
-        product_type = request.query_params.get('type')
-        product_quantity = request.query_params.get('quantity')
-        allow_collection = request.query_params.get('collection')
-        all_category = request.query_params.get('category')=="true"
+        params = request.query_params
+        product_type = params.get("type")
+        product_quantity = params.get("quantity")
+        allow_collection = params.get("collection")
+        all_category = params.get("category") == "true"
 
-        cache_key = f"products:list:type={product_type}&quantity={product_quantity}&collection={allow_collection}"
+        # 🔑 Cache key
+        cache_key = f"products:list:{product_type}:{product_quantity}:{allow_collection}:{all_category}"
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
 
-        queryset = Product.objects.all()
+        # ✅ Base queryset with optimized prefetch/select
+        queryset = (
+            Product.objects.filter(productIsActive="published")
+            .select_related("productVariant", "productShipping", "productSeo")
+            .prefetch_related("productImages", "productCollection", "productCategory", "productTags")
+            .order_by("-productCreatedAt")
+        )
 
+        # ✅ Apply product type filter if valid
         if product_type in self.PRODUCT_TYPE_FILTERS:
-            queryset = queryset.filter(
-                **self.PRODUCT_TYPE_FILTERS[product_type],
-                productIsActive="published"
-            ).order_by('-productCreatedAt')
+            queryset = queryset.filter(**self.PRODUCT_TYPE_FILTERS[product_type])
 
+        # ✅ Products (quantity or pagination)
         if product_quantity:
-            quantity = self._parse_int(product_quantity, "quantity")
-            if quantity is None:
-                return Response({'error': 'Invalid quantity. Must be an integer.'}, status=400)
-            queryset = queryset[:quantity]
+            try:
+                quantity = int(product_quantity)
+                queryset = queryset[:quantity]
+            except ValueError:
+                return Response({"error": "Invalid quantity. Must be an integer."}, status=400)
 
-        data = MiniProductSerializer(queryset, many=True).data
+            products_data = MiniProductSerializer(queryset, many=True).data
 
+        elif product_type in self.PRODUCT_TYPE_FILTERS:
+            # MiniProduct types → full list without pagination
+            products_data = MiniProductSerializer(queryset, many=True).data
+
+        else:
+            # Other types → paginated
+            paginator = SmallPagination()
+            page = paginator.paginate_queryset(queryset, request)
+            products_data = MiniProductSerializer(page, many=True).data
+            return paginator.get_paginated_response({"products": products_data})
+
+        # ✅ Build response
+        response_data = {"products": products_data}
+
+        # ✅ Add collections if requested
         if allow_collection:
-            collection_quantity = self._parse_int(allow_collection, "collection quantity")
-            if collection_quantity is None:
-                return Response({'error': 'Invalid collection quantity. Must be an integer.'}, status=400)
-            collections = ProductCollection.objects.all()[:collection_quantity]
+            try:
+                c_qty = int(allow_collection)
+                collections = ProductCollection.objects.all().order_by("-created_at")[:c_qty]
+                response_data["collections"] = MiniCollectionSerializer(collections, many=True).data
+            except ValueError:
+                return Response({"error": "Invalid collection quantity. Must be an integer."}, status=400)
 
-            data = {
-                "products": data,
-                "collections": MiniCollectionSerializer(collections, many=True).data
-            }
-        
+        # ✅ Add categories if requested
         if all_category:
-            categories = ProductCategory.objects.all().order_by('-created_at')
-            data['categories'] = ProductCategorySerializer(categories, many=True).data
-            
+            categories = ProductCategory.objects.all().order_by("-created_at")
+            response_data["categories"] = ProductCategorySerializer(categories, many=True).data
 
-        cache.set(cache_key, data, timeout=300)
-        return Response(data)
+        # ✅ Cache final response (5 minutes)
+        cache.set(cache_key, response_data, timeout=300)
+        return Response(response_data)
 
     def retrieve(self, request, pk=None):
-        """
-        Retrieve product by either UUID or slug.
-        Supports caching for performance.
-        Allows returning full or mini data via ?view=mini|full
-        """
         identifier = iri_to_uri(pk)
         view_type = request.query_params.get("view", "full").lower().strip()
         vid = request.query_params.get("variant")
 
-        # Build cache key safely
         cache_key = self.make_cache_key(identifier, view_type, vid)
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            return Response(cached_data, status=status.HTTP_200_OK)
+        if (cached := cache.get(cache_key)):
+            return Response(cached, status=status.HTTP_200_OK)
 
-        # Detect UUID vs slug
+        # ✅ Detect UUID vs slug
         try:
-            uuid_obj = UUID(str(identifier))
-            filter_kwargs = {"id": uuid_obj}
+            filter_kwargs = {"id": UUID(str(identifier))}
         except (ValueError, TypeError):
             filter_kwargs = {"productSlug": identifier}
 
-        # Fetch product safely
-        product = get_object_or_404(Product, **filter_kwargs)
+        product = get_object_or_404(
+            Product.objects.select_related("productVariant", "productShipping", "productSeo")
+            .prefetch_related("productImages", "productCollection", "productCategory", "productTags"),
+            **filter_kwargs
+        )
 
-        # Mini view with variant
-        if view_type == "mini" and vid:
-            variant_value = getattr(product.productVariant, "variantValue", None)
-            if variant_value:
-                variant_value = variant_value.filter(id=vid).first()
-
-            if variant_value:
-                data = {
-                    "id": str(product.id),
-                    "slug": product.productSlug,
-                    "name": product.productName,
-                    "price": float(variant_value.valuePrice or product.productPrice),
-                    "image": (
-                        request.build_absolute_uri(variant_value.valueImage.url)
-                        if getattr(variant_value, "valueImage", None)
-                        else (
-                            request.build_absolute_uri(product.productImages.first().image.url)
-                            if product.productImages.exists() and product.productImages.first().image
-                            else None
-                        )
-                    ),
-                    "qty": 1,
-                    "variant": {
-                        "id": str(variant_value.id),
-                        "name": variant_value.valueName,
-                        "code": variant_value.colorCode,
-                        "sku": variant_value.valueSKU,
-                        "price": float(variant_value.valuePrice or 0),
-                        "image": (
-                            request.build_absolute_uri(variant_value.valueImage.url)
-                            if getattr(variant_value, "valueImage", None)
-                            else None
-                        ),
-                    }
-                }
-                cache.set(cache_key, data, timeout=300)
-                return Response(data, status=status.HTTP_200_OK)
-
-        # Fallback serializers
-        if view_type == "mini":
-            data = {
-                "id": str(product.id),
-                "slug": product.productSlug,
-                "name": product.productName,
-                "price": float(product.productPrice),
-                "image": (
-                    request.build_absolute_uri(product.productImages.first().image.url)
-                    if product.productImages.exists() and product.productImages.first().image
-                    else None
-                ),
+        # ✅ Mini view builder
+        def build_mini_data(prod, variant=None):
+            img = None
+            if variant and variant.valueImage:
+                img = request.build_absolute_uri(variant.valueImage.url)
+            elif prod.productImages.exists():
+                first_img = prod.productImages.first()
+                if first_img and first_img.image:
+                    img = request.build_absolute_uri(first_img.image.url)
+        
+            return {
+                "id": str(prod.id),
+                "slug": prod.productSlug,
+                "name": prod.productName,
+                "price": float((variant and variant.valuePrice) or prod.productPrice),
+                "image": img,
                 "qty": 1,
+                "variant": (
+                    {
+                        "id": str(variant.id),
+                        "name": variant.valueName,
+                        "code": variant.colorCode,
+                        "sku": variant.valueSKU,
+                        "price": float(variant.valuePrice or 0),
+                        "image": request.build_absolute_uri(variant.valueImage.url) if variant.valueImage else None,
+                    }
+                    if variant else None
+                ),
             }
+
+
+        # ✅ Variant mini view
+        if view_type == "mini":
+            variant_value = None
+            if vid:
+                variant_value = getattr(product.productVariant, "variantValue", None)
+                variant_value = variant_value.filter(id=vid).first() if variant_value else None
+            data = build_mini_data(product, variant_value)
         else:
             data = ProductSerializer(product).data
 
@@ -160,85 +171,64 @@ class ProductViewSet(viewsets.ViewSet):
 
     @staticmethod
     def make_cache_key(identifier: str, view_type: str, vid: str | None = None) -> str:
-        """
-        Generate a consistent cache key for product details.
-        Example: products:detail:id=123:view=mini:variant=456
-        """
-        parts = [
-            "products:detail",
-            f"id={identifier}",
-            f"view={view_type}"
-        ]
-        if vid:
-            parts.append(f"variant={vid}")
-        return ":".join(parts)
+        return ":".join(["products:detail", f"id={identifier}", f"view={view_type}", f"variant={vid}" if vid else ""])
 
-    @staticmethod
-    def _parse_int(value, field_name):
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return None
 
 
 class CollectionViewset(viewsets.ViewSet):
+    """
+    Optimized ViewSet for Product Collections.
+    - Uses caching for list & detail.
+    - Handles quantity param safely.
+    - Minimizes DB load with `only()`.
+    """
+
+    CACHE_TIMEOUT = 300  # 5 minutes
 
     def list(self, request):
-        product_quantity = request.query_params.get('quantity')
-        cache_key = f"collections:{product_quantity or 'list'}"
+        product_quantity = request.query_params.get("quantity")
 
-        # Return cached data if available
-        if cached_data := cache.get(cache_key):
-            return Response(cached_data, status=status.HTTP_200_OK)
+        # build cache key
+        cache_key = f"collections:list:{product_quantity or 'all'}"
+        if cached := cache.get(cache_key):
+            return Response(cached, status=status.HTTP_200_OK)
 
-        try:
-            collections = ProductCollection.objects.all()
+        # validate quantity
+        quantity = None
+        if product_quantity:
+            if not product_quantity.isdigit():
+                return Response(
+                    {"error": "Invalid quantity. Must be an integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            quantity = int(product_quantity)
 
-            if product_quantity:
-                try:
-                    quantity = int(product_quantity)
-                    collections = collections[:quantity]
-                except ValueError:
-                    return Response(
-                        {"error": "Invalid quantity. Must be an integer."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+        # optimized queryset (load only required fields for MiniCollectionSerializer)
+        queryset = ProductCollection.objects.only("id", "collectionName", "collectionSlug").order_by("-created_at")
+        if quantity:
+            queryset = queryset[:quantity]
 
-            serializer = MiniCollectionSerializer(collections, many=True)
-            data = serializer.data
+        serializer = MiniCollectionSerializer(queryset, many=True)
+        data = {"collections": serializer.data}
 
-            # Cache for 5 minutes
-            cache.set(cache_key, data, timeout=300)
-
-            return Response(data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        cache.set(cache_key, data, timeout=self.CACHE_TIMEOUT)
+        return Response(data, status=status.HTTP_200_OK)
 
     def retrieve(self, request, pk=None):
         slug = iri_to_uri(pk)
         cache_key = f"collections:detail:{slug}"
-        cached_data = cache.get(cache_key)
 
-        if cached_data:
-            return Response(cached_data, status=status.HTTP_200_OK)
+        if cached := cache.get(cache_key):
+            return Response(cached, status=status.HTTP_200_OK)
 
-        try:
-            collection = get_object_or_404(ProductCollection, collectionSlug=slug)
-            serializer = ProductCollectionSerializer(collection)
-            data = serializer.data
-            cache.set(cache_key, data, timeout=300)
-            return Response(data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(
-                {"error": "Something went wrong", "details": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        collection = get_object_or_404(
+            ProductCollection.objects.select_related(), collectionSlug=slug
+        )
+        serializer = ProductCollectionSerializer(collection)
+        data = serializer.data
 
-
+        cache.set(cache_key, data, timeout=self.CACHE_TIMEOUT)
+        return Response(data, status=status.HTTP_200_OK)
 
 # -------------------------------
 # SearchProduct API View
